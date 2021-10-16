@@ -229,6 +229,9 @@ class SshCertTestCase(E2eTestCase):
         self.assertEqual("ssh-cert", result["token_type"])
 
     @unittest.skipIf(os.getenv("TRAVIS"), "Browser automation is not yet implemented")
+    @unittest.skipIf(
+        msal.application._is_running_in_cloud_shell(),
+        "The test app does not opt in to Cloud Shell")
     def test_ssh_cert_for_user(self):
         result = self._test_acquire_token_interactive(
             client_id="04b07795-8ddb-461a-bbee-02f9e1bf7b46",  # Azure CLI is one
@@ -252,6 +255,19 @@ class SshCertTestCase(E2eTestCase):
         self.assertIsNotNone(refreshed_ssh_cert)
         self.assertEqual(refreshed_ssh_cert["token_type"], "ssh-cert")
         self.assertNotEqual(result["access_token"], refreshed_ssh_cert['access_token'])
+
+    @unittest.skipUnless(
+        msal.application._is_running_in_cloud_shell(),
+        "Manually run this by python -m unittest tests.test_e2e.SshCertTestCase")
+    def test_ssh_cert_for_user_silent_inside_cloud_shell(self):
+        app = msal.PublicClientApplication("client_id_wont_matter")
+        accounts = app.get_accounts()
+        self.assertNotEqual([], accounts)
+        result = app.acquire_token_silent_with_error(
+            self.SCOPE, account=accounts[0], data=self.DATA1)
+        self.assertEqual(
+            "ssh-cert", result.get("token_type"), "Unexpected result: %s" % result)
+        self.assertIsNotNone(result.get("access_token"))
 
 
 THIS_FOLDER = os.path.dirname(__file__)
