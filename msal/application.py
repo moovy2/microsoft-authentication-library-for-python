@@ -1224,7 +1224,10 @@ class ClientApplication(object):
                         "https://{}/{}".format(self.authority.instance, self.authority.tenant),  # TODO: What about B2C & ADFS?
                         self.client_id,
                         account["local_account_id"],
-                        " ".join(scopes))
+                        " ".join(scopes),
+                        claims=_merge_claims_challenge_and_capabilities(
+                            self._client_capabilities, claims_challenge),
+                        )
                     if "error" not in response:
                         self.token_cache.add(dict(
                             client_id=self.client_id,
@@ -1577,6 +1580,8 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
               and typically contains an "access_token" key.
             - A dict containing an "error" key, when token refresh failed.
         """
+        claims = _merge_claims_challenge_and_capabilities(
+            self._client_capabilities, claims_challenge)
         if sys.platform == "win32":
             try:
                 from .wam import _signin_interactively
@@ -1586,6 +1591,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                     " ".join(scopes),
                     login_hint=login_hint,
                     prompt=prompt,
+                    claims=claims,
                     )
                 if "error" not in response:
                     self.token_cache.add(dict(
@@ -1601,8 +1607,6 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                 logger.exception("Mid-tier is not available in current version of Windows")
 
         self._validate_ssh_cert_input_data(kwargs.get("data", {}))
-        claims = _merge_claims_challenge_and_capabilities(
-            self._client_capabilities, claims_challenge)
         telemetry_context = self._build_telemetry_context(
             self.ACQUIRE_TOKEN_INTERACTIVE)
         response = _clean_up(self.client.obtain_token_by_browser(
