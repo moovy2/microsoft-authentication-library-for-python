@@ -1139,6 +1139,21 @@ class ClientApplication(object):
         """
         assert isinstance(scopes, list), "Invalid parameter type"
         self._validate_ssh_cert_input_data(kwargs.get("data", {}))
+
+        # TODO: TBD
+        # Currently, the following implementation activates Cloud Shell (CS) code path
+        # when a pseudo account was specified.
+        # But when/if the user signs in explicitly (such as "az login") with SAME account,
+        # to obtain tokens with scope(s) not supported by Cloud Shell's IMDS,
+        # the user would end up with one real account and still one pseudo account,
+        # both with same username.
+        # It would become unrealistic for end user to reason why
+        # the pseudo "default user" account would go one code path,
+        # and the real account would go another.
+        # I will probably refactor to automatically group Cloud Shell's default account
+        # and the real account into one, if they have same username.
+        # And then, acquire_token_silent() will always try real account if RT is available,
+        # and fallback to the Cloud Shell code path.
         if account and account.get("home_account_id") == _CLOUD_SHELL_USER:
             # Since we don't currently store cloud shell tokens in MSAL's cache,
             # we can have a shortcut here, and semantically bypass all those
