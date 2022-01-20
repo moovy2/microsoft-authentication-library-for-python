@@ -13,7 +13,7 @@ import pymsalruntime  # ImportError would be raised on unsupported platforms suc
 logger = logging.getLogger(__name__)
 
 
-class NeedRedirectURI(ValueError):
+class RedirectUriError(ValueError):
     pass
 
 

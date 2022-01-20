@@ -1243,7 +1243,7 @@ class ClientApplication(object):
                             ))
                     return _clean_up(response)
                 except ImportError:
-                    logger.exception("Mid-tier is not available in current version of Windows")
+                    logger.warning("PyMsalRuntime is not available")
             result = _clean_up(self._acquire_token_silent_by_finding_rt_belongs_to_me_or_my_family(
                 authority, self._decorate_scope(scopes), account,
                 refresh_reason=refresh_reason, claims_challenge=claims_challenge,
@@ -1588,9 +1588,9 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
             self._client_capabilities, claims_challenge)
         if sys.platform == "win32":
             try:
-                from .wam import _signin_interactively, NeedRedirectURI
+                from .wam import _signin_interactively, RedirectUriError
                 if extra_scopes_to_consent:  # TODO: Not supported in WAM/Mid-tier
-                    logger.warn(
+                    logger.warning(
                         "Ignoring parameter extra_scopes_to_consent, "
                         "which is not supported on current platform")
                 response = _signin_interactively(
@@ -1613,9 +1613,9 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                         ))
                 return _clean_up(response)
             except ImportError:
-                logger.exception("Mid-tier is not available in current version of Windows")
-            except NeedRedirectURI as e:  # Experimental: Catch, log, and fallback
-                logger.warning(e)
+                logger.warning("PyMsalRuntime is not available")
+            except RedirectUriError as e:  # Experimental: Catch, log, and fallback
+                logger.warning(str(e) + " Now we fallback to use browser.")
 
         self._validate_ssh_cert_input_data(kwargs.get("data", {}))
         telemetry_context = self._build_telemetry_context(

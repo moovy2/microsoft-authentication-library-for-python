@@ -2,20 +2,31 @@ from tests import unittest
 import logging
 import sys
 
+if not sys.platform.startswith("win"):
+    raise unittest.SkipTest("requires Windows")
+from msal.wam import (  # Import them after the platform check
+    _signin_interactively, _acquire_token_silently, RedirectUriError)
+
+
 logging.basicConfig(level=logging.DEBUG)
 
-@unittest.skipUnless(sys.platform.startswith("win"), "requires Windows")
 class TestWam(unittest.TestCase):
-    def test_interactive_then_silent(self):
-        from msal.wam import _signin_interactively, _acquire_token_silently  # Lazy import
-        client_id = "26a7ee05-5602-4d76-a7ba-eae8b7b67941"  # A pre-configured test app
-        authority = "https://login.microsoftonline.com/common"
-        scopes = ["https://graph.microsoft.com/.default"]
+    _authority = "https://login.microsoftonline.com/common"
+    _scopes = ["https://graph.microsoft.com/.default"]
 
-        result = _signin_interactively(authority, client_id, scopes)
+    def test_interactive_then_silent(self):
+        client_id = "26a7ee05-5602-4d76-a7ba-eae8b7b67941"  # A pre-configured test app
+
+        result = _signin_interactively(self._authority, client_id, self._scopes)
         self.assertIsNotNone(result.get("access_token"), result)
 
         account_id = result["_account_id"]
-        result = _acquire_token_silently(authority, client_id, account_id, scopes)
+        result = _acquire_token_silently(self._authority, client_id, account_id, self._scopes)
         self.assertIsNotNone(result.get("access_token"), result)
 
+    def test_unconfigured_app_should_raise_exception(self):
+        client_id = "289a413d-284b-4303-9c79-94380abe5d22"  # A test app without proper redirect_uri
+        with self.assertRaises(RedirectUriError):
+            _signin_interactively(self._authority, client_id, self._scopes)
+        # Note: _acquire_token_silently() would raise same exception,
+        #       we skip its test here due to the lack of a valid account_id
