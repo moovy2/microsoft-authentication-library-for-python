@@ -112,7 +112,7 @@ def _signin_interactively(
                 pymsalruntime.SelectAccountOption.SHOWLOCALACCOUNTSCONTROL)
         else:
             # TODO: MSAL Python might need to error out on other prompt values
-            logger.warn("prompt=%s is not supported on this platform", prompt)
+            logger.warning("prompt=%s is not supported on this platform", prompt)
     for k, v in kwargs.items():  # This can be used to support domain_hint, max_age, etc.
         if v is not None:
             params.set_additional_parameter(k, str(v))  # TODO: End-to-end test
