@@ -100,6 +100,14 @@ def _signin_interactively(
         # the actual redirect_uri will be a value hardcoded by the underlying WAM
     if prompt:
         if prompt == "select_account":
+            if login_hint:
+                # FWIW, AAD's browser interactive flow would honor select_account
+                # and ignore login_hint in such a case.
+                # But pymsalruntime 0.3.x would pop up a meaningless account picker
+                # and then force the account_hint user to re-input password. Not what we want.
+                # https://identitydivision.visualstudio.com/Engineering/_workitems/edit/1744492
+                login_hint = None  # Mimicing the AAD behavior
+                logger.warning("Using both select_account and login_hint is ambiguous. Ignoring login_hint.")
             params.set_select_account_option(
                 pymsalruntime.SelectAccountOption.SHOWLOCALACCOUNTSCONTROL)
         else:
