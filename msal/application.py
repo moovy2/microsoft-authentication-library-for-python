@@ -1593,10 +1593,16 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                     logger.warning(
                         "Ignoring parameter extra_scopes_to_consent, "
                         "which is not supported on current platform")
+                if "welcome_template" in kwargs:
+                    logger.debug(kwargs["welcome_template"])  # Experimental
                 response = _signin_interactively(
-                    "https://{}/{}".format(self.authority.instance, self.authority.tenant),  # TODO: What about B2C & ADFS?
+                    "https://{}/{}".format(self.authority.instance, self.authority.tenant),  # TODO: What about B2C?
                     self.client_id,
                     scopes,
+                    validateAuthority="no"
+                        if self.authority._validate_authority is False
+                        or self.authority.is_adfs
+                        else None,
                     login_hint=login_hint,
                     prompt=prompt,
                     claims=claims,

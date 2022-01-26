@@ -685,9 +685,18 @@ class WorldWideTestCase(LabBasedTestCase):
         config["authority"] = "https://fs.%s.com/adfs" % config["lab_name"]
         config["scope"] = self.adfs2019_scopes
         config["port"] = 8080
-        self._test_acquire_token_interactive(
-            username_uri="https://msidlab.com/api/user?usertype=onprem&federationprovider=ADFSv2019",
-            **config)
+        username_uri = "https://msidlab.com/api/user?usertype=onprem&federationprovider=ADFSv2019"
+        try:
+            import pymsalruntime
+            logger.warning("Absorbing an AssertionError because PyMsalRuntime does not yet support onprem ADFS")
+            with self.assertRaises(AssertionError):  # Expecting a failure because
+                # PyMsalRuntime does not yet support on-prem ADFS.
+                # But if this expectation is not met,
+                # it would mean the latest PyMsalRuntime supports onprem ADFS.
+                # At that time we would revert this patch.
+                self._test_acquire_token_interactive(username_uri=username_uri, **config)
+        except ImportError:  # Then use browser-based interactive flow, which will work
+            self._test_acquire_token_interactive(username_uri=username_uri, **config)
 
     @unittest.skipUnless(
         os.getenv("LAB_OBO_CLIENT_SECRET"),
