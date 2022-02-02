@@ -30,3 +30,15 @@ class TestWam(unittest.TestCase):
             _signin_interactively(self._authority, client_id, self._scopes)
         # Note: _acquire_token_silently() would raise same exception,
         #       we skip its test here due to the lack of a valid account_id
+
+    def test_login_hint(self):
+        pass  # TODO
+
+    def test_signin_interactively_and_select_account(self):
+        client_id = "26a7ee05-5602-4d76-a7ba-eae8b7b67941"  # A pre-configured test app
+        print("An account picker UI will pop up. See whether the auth result matches your account")
+        result = _signin_interactively(
+            self._authority, client_id, self._scopes, prompt="select_account")
+        self.assertIsNotNone(result.get("access_token"), result)
+        import pprint; pprint.pprint(result)
+
