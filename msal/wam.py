@@ -75,10 +75,13 @@ def _convert_result(result, client_id):  # Mimic an on-the-wire response from AA
     return return_value
 
 
-def _signin_silently(authority, client_id, scopes):
+def _signin_silently(authority, client_id, scopes, **kwargs):
     params = pymsalruntime.MSALRuntimeAuthParameters(client_id, authority)
     params.set_requested_scopes(scopes)
     callback_data = _CallbackData()
+    for k, v in kwargs.items():  # This can be used to support domain_hint, max_age, etc.
+        if v is not None:
+            params.set_additional_parameter(k, str(v))
     pymsalruntime.signin_silently(
         params,
         "correlation", # TODO

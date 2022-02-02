@@ -470,6 +470,9 @@ class ClientApplication(object):
                     self.http_client, validate_authority=False)
             else:
                 raise
+        self._enable_broker = (
+            isinstance(self, PublicClientApplication)  # Exclude Confidential ROPC
+            and sys.platform == "win32" and not self.authority.is_adfs)
 
         self.token_cache = token_cache or TokenCache()
         self._region_configured = azure_region
@@ -1221,7 +1224,8 @@ class ClientApplication(object):
             refresh_reason = msal.telemetry.FORCE_REFRESH  # TODO: It could also mean claims_challenge
         assert refresh_reason, "It should have been established at this point"
         try:
-            if sys.platform == "win32":
+            if self._enable_broker:  # If interactive flow or ROPC were not through broker,
+                    # the _acquire_token_silently() is unlikely to locate the account.
                 try:
                     from .wam import _acquire_token_silently
                     response = _acquire_token_silently(
@@ -1432,14 +1436,43 @@ class ClientApplication(object):
             - A successful response would contain "access_token" key,
             - an error response would contain "error" and usually "error_description".
         """
+        claims = _merge_claims_challenge_and_capabilities(
+                self._client_capabilities, claims_challenge)
+        if self._enable_broker:
+            try:
+                from .wam import _signin_silently, RedirectUriError
+                response = _signin_silently(
+                    "https://{}/{}".format(self.authority.instance, self.authority.tenant),  # TODO: What about B2C?
+                    self.client_id,
+                    scopes,  # Decorated scopes won't work due to offline_access
+                    MSALRuntime_Username=username,
+                    MSALRuntime_Password=password,
+                    validateAuthority="no"
+                        if self.authority._validate_authority is False
+                        or self.authority.is_adfs
+                        else None,
+                    claims=claims,
+                    )
+                if "error" not in response:
+                    self.token_cache.add(dict(
+                        client_id=self.client_id,
+                        scope=response["scope"].split() if "scope" in response else scopes,
+                        token_endpoint=self.authority.token_endpoint,
+                        response=response.copy(),
+                        data=kwargs.get("data", {}),
+                        _account_id=response["_account_id"],
+                        ))
+                return _clean_up(response)
+            except ImportError:
+                logger.warning("PyMsalRuntime is not available")
+            except RedirectUriError as e:  # Experimental: Catch, log, and fallback
+                logger.warning(str(e) + " Now we fallback to use non-broker.")
+
         scopes = self._decorate_scope(scopes)
         telemetry_context = self._build_telemetry_context(
             self.ACQUIRE_TOKEN_BY_USERNAME_PASSWORD_ID)
         headers = telemetry_context.generate_headers()
-        data = dict(
-            kwargs.pop("data", {}),
-            claims=_merge_claims_challenge_and_capabilities(
-                self._client_capabilities, claims_challenge))
+        data = dict(kwargs.pop("data", {}), claims=claims)
         if not self.authority.is_adfs:
             user_realm_result = self.authority.user_realm_discovery(
                 username, correlation_id=headers[msal.telemetry.CLIENT_REQUEST_ID])
@@ -1586,7 +1619,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
         """
         claims = _merge_claims_challenge_and_capabilities(
             self._client_capabilities, claims_challenge)
-        if sys.platform == "win32":
+        if self._enable_broker:
             try:
                 from .wam import _signin_interactively, RedirectUriError
                 if extra_scopes_to_consent:  # TODO: Not supported in WAM/Mid-tier
