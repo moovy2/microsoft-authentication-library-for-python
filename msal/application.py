@@ -173,6 +173,19 @@ class ClientApplication(object):
                 # when we would eventually want to add this feature to PCA in future.
             exclude_scopes=None,
             http_cache=None,
+            known_authorities=None,  # TBD:
+                # The plan was to implemented it as a list of strings,
+                # such that MSAL will internally calculate validate_authority as:
+                #   validate_authority = authority not in known_authorities
+                #
+                # The internal workitem
+                # https://identitydivision.visualstudio.com/Engineering/_workitems/edit/823221
+                # and its internal proposal described a changed programming model at the end:
+                # https://identitydivision.visualstudio.com/Engineering/_workitems/edit/823221
+                #
+                # This would make more sense when MSAL Python provides multi-tenant support,
+                # such as accepting either authority or tenant_id in acquire_token_by_xyz().
+                # We would need to re-evaluate this topic holistically.
             ):
         """Create an instance of application.
 
