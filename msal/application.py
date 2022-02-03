@@ -470,9 +470,11 @@ class ClientApplication(object):
                     self.http_client, validate_authority=False)
             else:
                 raise
-        self._enable_broker = (
-            isinstance(self, PublicClientApplication)  # Exclude Confidential ROPC
-            and sys.platform == "win32" and not self.authority.is_adfs)
+        is_public_app = (isinstance(self, PublicClientApplication) or
+            (isinstance(self, ClientApplication) and not self.client_credential))
+        self._enable_broker = (is_public_app
+            and sys.platform == "win32"
+            and not self.authority.is_adfs and not self.authority._is_b2c)
 
         self.token_cache = token_cache or TokenCache()
         self._region_configured = azure_region
@@ -1229,7 +1231,7 @@ class ClientApplication(object):
                 try:
                     from .wam import _acquire_token_silently
                     response = _acquire_token_silently(
-                        "https://{}/{}".format(self.authority.instance, self.authority.tenant),  # TODO: What about B2C & ADFS?
+                        "https://{}/{}".format(self.authority.instance, self.authority.tenant),
                         self.client_id,
                         account["local_account_id"],
                         scopes,
@@ -1442,14 +1444,14 @@ class ClientApplication(object):
             try:
                 from .wam import _signin_silently, RedirectUriError
                 response = _signin_silently(
-                    "https://{}/{}".format(self.authority.instance, self.authority.tenant),  # TODO: What about B2C?
+                    "https://{}/{}".format(self.authority.instance, self.authority.tenant),
                     self.client_id,
                     scopes,  # Decorated scopes won't work due to offline_access
                     MSALRuntime_Username=username,
                     MSALRuntime_Password=password,
                     validateAuthority="no"
                         if self.authority._validate_authority is False
-                        or self.authority.is_adfs
+                        or self.authority.is_adfs or self.authority._is_b2c
                         else None,
                     claims=claims,
                     )
@@ -1629,12 +1631,12 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                 if "welcome_template" in kwargs:
                     logger.debug(kwargs["welcome_template"])  # Experimental
                 response = _signin_interactively(
-                    "https://{}/{}".format(self.authority.instance, self.authority.tenant),  # TODO: What about B2C?
+                    "https://{}/{}".format(self.authority.instance, self.authority.tenant),
                     self.client_id,
                     scopes,
                     validateAuthority="no"
                         if self.authority._validate_authority is False
-                        or self.authority.is_adfs
+                        or self.authority.is_adfs or self.authority._is_b2c
                         else None,
                     login_hint=login_hint,
                     prompt=prompt,
