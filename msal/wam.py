@@ -34,7 +34,9 @@ def _convert_error(error, client_id):
             "MsalRuntime won't work unless this one more redirect_uri is registered to current app: "
             "ms-appx-web://Microsoft.AAD.BrokerPlugin/{}".format(client_id))
     return {
-        "error": "broker_error",
+        "error": "broker_error",  # Note: Broker implies your device needs to be compliant.
+            # You may use "dsregcmd /status" to check your device state
+            # https://docs.microsoft.com/en-us/azure/active-directory/devices/troubleshoot-device-dsregcmd
         "error_description": "{}. Status: {}, Error code: {}, Tag: {}".format(
             context,
             error.get_status(), error.get_error_code(), error.get_tag()),
