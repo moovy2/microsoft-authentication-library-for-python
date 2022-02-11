@@ -470,9 +470,9 @@ class ClientApplication(object):
                     self.http_client, validate_authority=False)
             else:
                 raise
-        is_public_app = (isinstance(self, PublicClientApplication) or
-            (isinstance(self, ClientApplication) and not self.client_credential))
-        self._enable_broker = (is_public_app
+        is_confidential_app = bool(
+                isinstance(self, ConfidentialClientApplication) or self.client_credential)
+        self._enable_broker = (not is_confidential_app
             and sys.platform == "win32"
             and not self.authority.is_adfs and not self.authority._is_b2c)
 
@@ -1226,8 +1226,12 @@ class ClientApplication(object):
             refresh_reason = msal.telemetry.FORCE_REFRESH  # TODO: It could also mean claims_challenge
         assert refresh_reason, "It should have been established at this point"
         try:
-            if self._enable_broker:  # If interactive flow or ROPC were not through broker,
-                    # the _acquire_token_silently() is unlikely to locate the account.
+            if (
+                    self._enable_broker
+                        # If interactive flow or ROPC were not through broker,
+                        # the _acquire_token_silently() is unlikely to locate the account.
+                    and account is not None  # MSAL Python requires this
+                    ):
                 try:
                     from .wam import _acquire_token_silently
                     response = _acquire_token_silently(
