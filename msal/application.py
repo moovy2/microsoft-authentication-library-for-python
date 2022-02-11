@@ -1238,16 +1238,17 @@ class ClientApplication(object):
                         claims=_merge_claims_challenge_and_capabilities(
                             self._client_capabilities, claims_challenge),
                         )
-                    if "error" not in response:
-                        self.token_cache.add(dict(
-                            client_id=self.client_id,
-                            scope=response["scope"].split() if "scope" in response else scopes,
-                            token_endpoint=self.authority.token_endpoint,
-                            response=response.copy(),
-                            data=kwargs.get("data", {}),
-                            _account_id=response["_account_id"],
-                            ))
-                    return _clean_up(response)
+                    if response:  # It means broker was able to provide a decisive outcome
+                        if "error" not in response:
+                            self.token_cache.add(dict(
+                                client_id=self.client_id,
+                                scope=response["scope"].split() if "scope" in response else scopes,
+                                token_endpoint=self.authority.token_endpoint,
+                                response=response.copy(),
+                                data=kwargs.get("data", {}),
+                                _account_id=response["_account_id"],
+                                ))
+                        return _clean_up(response)  # Then we use the broker's result
                 except ImportError:
                     logger.warning("PyMsalRuntime is not available")
             result = _clean_up(self._acquire_token_silent_by_finding_rt_belongs_to_me_or_my_family(

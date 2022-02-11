@@ -139,6 +139,8 @@ def _acquire_token_silently(authority, client_id, account_id, scopes, claims=Non
     error = account.get_error()
     if error:
         return _convert_error(error, client_id)
+    if not account.get_account():  # It happens when the account was not created by broker
+        return
     params = pymsalruntime.MSALRuntimeAuthParameters(client_id, authority)
     params.set_requested_scopes(scopes)
     if claims:
