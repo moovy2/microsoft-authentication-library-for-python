@@ -1233,7 +1233,7 @@ class ClientApplication(object):
                     and account is not None  # MSAL Python requires this
                     ):
                 try:
-                    from .wam import _acquire_token_silently
+                    from .broker import _acquire_token_silently
                     response = _acquire_token_silently(
                         "https://{}/{}".format(self.authority.instance, self.authority.tenant),
                         self.client_id,
@@ -1447,7 +1447,7 @@ class ClientApplication(object):
                 self._client_capabilities, claims_challenge)
         if self._enable_broker:
             try:
-                from .wam import _signin_silently, RedirectUriError
+                from .broker import _signin_silently, RedirectUriError
                 response = _signin_silently(
                     "https://{}/{}".format(self.authority.instance, self.authority.tenant),
                     self.client_id,
@@ -1628,8 +1628,8 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
             self._client_capabilities, claims_challenge)
         if self._enable_broker:
             try:
-                from .wam import _signin_interactively, RedirectUriError
-                if extra_scopes_to_consent:  # TODO: Not supported in WAM/Mid-tier
+                from .broker import _signin_interactively, RedirectUriError
+                if extra_scopes_to_consent:  # TODO: Not supported in broker
                     logger.warning(
                         "Ignoring parameter extra_scopes_to_consent, "
                         "which is not supported on current platform")

@@ -1,6 +1,7 @@
-"""This module acquires token via WAM, with the help of Mid-tier.
+"""This module is an adaptor to the underlying broker.
+PyMsalRuntime is the package providing broker's functionality.
 
-Mid-tier supports these Windows versions
+PyMsalRuntime currently supports these Windows versions, listed in this MSFT internal link
 https://github.com/AzureAD/microsoft-authentication-library-for-cpp/pull/2406/files
 """
 from threading import Event
