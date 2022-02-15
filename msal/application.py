@@ -1561,6 +1561,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
             port=None,
             extra_scopes_to_consent=None,
             max_age=None,
+            window=None,
             **kwargs):
         """Acquire token interactively i.e. via a local browser.
 
@@ -1617,6 +1618,12 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
 
             New in version 1.15.
 
+        :param int window:
+            OPTIONAL. If your app is a GUI app running on modern Windows system,
+            and your app opts in to use broker,
+            you are recommended to also provide its window handle,
+            so that the sign in UI window will properly pop up on top of your window.
+
         :return:
             - A dict containing no "error" key,
               and typically contains an "access_token" key.
@@ -1645,6 +1652,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                     prompt=prompt,
                     claims=claims,
                     max_age=max_age,  # TODO: MSAL Python or broker need to validate the auth_time
+                    window=window,
                     )
                 return self._process_broker_response(response, scopes, kwargs.get("data", {}))
             except ImportError:

@@ -167,12 +167,12 @@ def _acquire_token_interactively(
         client_id,
         account_id,
         scopes,
-        prompt=None,  # TODO: Perhaps WAM would not accept this?
-        domain_hint=None,  # TODO: Perhaps WAM would not accept this?
+        prompt=None,  # TODO
         claims=None,
-        timeout=None,  # TODO
-        extra_scopes_to_consent=None,  # TODO: Perhaps WAM would not accept this?
-        max_age=None,  # TODO: Perhaps WAM would not accept this?
+        extra_scopes_to_consent=None,  # TODO
+        max_age=None,  # TODO
+        correlation_id=None,
+        window=None,
         **kwargs):
     raise NotImplementedError("We ended up not currently using this function")
     account = _read_account_by_id(account_id)
@@ -183,12 +183,14 @@ def _acquire_token_interactively(
     params.set_requested_scopes(scopes)
     if claims:
         params.set_decoded_claims(claims)
-    # TODO: Wire up other input parameters too
+    for k, v in kwargs.items():  # This can be used to support domain_hint, max_age, etc.
+        if v is not None:
+            params.set_additional_parameter(k, str(v))
     callback_data = _CallbackData()
     pymsalruntime.acquire_token_interactively(
-        window,  # TODO
+        window or pymsalruntime.get_console_window() or pymsalruntime.get_desktop_window(),  # Since pymsalruntime 0.2+
         params,
-        "correlation", # TODO
+        correlation_id or _get_new_correlation_id(),
         account.get_account(),
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()
