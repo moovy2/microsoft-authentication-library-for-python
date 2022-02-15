@@ -1242,17 +1242,9 @@ class ClientApplication(object):
                         claims=_merge_claims_challenge_and_capabilities(
                             self._client_capabilities, claims_challenge),
                         )
-                    if response:  # It means broker was able to provide a decisive outcome
-                        if "error" not in response:
-                            self.token_cache.add(dict(
-                                client_id=self.client_id,
-                                scope=response["scope"].split() if "scope" in response else scopes,
-                                token_endpoint=self.authority.token_endpoint,
-                                response=response.copy(),
-                                data=kwargs.get("data", {}),
-                                _account_id=response["_account_id"],
-                                ))
-                        return _clean_up(response)  # Then we use the broker's result
+                    if response:  # The broker provided a decisive outcome for this account
+                        return self._process_broker_response(  # Then we use it
+                            response, scopes, kwargs.get("data", {}))
                 except ImportError:
                     logger.warning("PyMsalRuntime is not available")
             result = _clean_up(self._acquire_token_silent_by_finding_rt_belongs_to_me_or_my_family(
@@ -1266,6 +1258,18 @@ class ClientApplication(object):
             if not access_token_from_cache:  # It means there is no fall back option
                 raise  # We choose to bubble up the exception
         return access_token_from_cache
+
+    def _process_broker_response(self, response, scopes, data):
+        if "error" not in response:
+            self.token_cache.add(dict(
+                client_id=self.client_id,
+                scope=response["scope"].split() if "scope" in response else scopes,
+                token_endpoint=self.authority.token_endpoint,
+                response=response.copy(),
+                data=data,
+                _account_id=response["_account_id"],
+                ))
+        return _clean_up(response)
 
     def _acquire_token_silent_by_finding_rt_belongs_to_me_or_my_family(
             self, authority, scopes, account, **kwargs):
@@ -1460,16 +1464,7 @@ class ClientApplication(object):
                         else None,
                     claims=claims,
                     )
-                if "error" not in response:
-                    self.token_cache.add(dict(
-                        client_id=self.client_id,
-                        scope=response["scope"].split() if "scope" in response else scopes,
-                        token_endpoint=self.authority.token_endpoint,
-                        response=response.copy(),
-                        data=kwargs.get("data", {}),
-                        _account_id=response["_account_id"],
-                        ))
-                return _clean_up(response)
+                return self._process_broker_response(response, scopes, kwargs.get("data", {}))
             except ImportError:
                 logger.warning("PyMsalRuntime is not available")
             except RedirectUriError as e:  # Experimental: Catch, log, and fallback
@@ -1648,16 +1643,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                     claims=claims,
                     max_age=max_age,  # TODO: MSAL Python need to validate the auth_time
                     )
-                if "error" not in response:
-                    self.token_cache.add(dict(
-                        client_id=self.client_id,
-                        scope=response["scope"].split() if "scope" in response else scopes,
-                        token_endpoint=self.authority.token_endpoint,
-                        response=response.copy(),
-                        data=kwargs.get("data", {}),
-                        _account_id=response["_account_id"],
-                        ))
-                return _clean_up(response)
+                return self._process_broker_response(response, scopes, kwargs.get("data", {}))
             except ImportError:
                 logger.warning("PyMsalRuntime is not available")
             except RedirectUriError as e:  # Experimental: Catch, log, and fallback
