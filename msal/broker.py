@@ -7,6 +7,7 @@ https://github.com/AzureAD/microsoft-authentication-library-for-cpp/pull/2406/fi
 from threading import Event
 import json
 import logging
+import uuid
 
 import pymsalruntime  # ImportError would be raised on unsupported platforms such as Windows 8
     # Its API description is available in site-packages/pymsalruntime/PyMsalRuntime.pyi
@@ -78,7 +79,11 @@ def _convert_result(result, client_id):  # Mimic an on-the-wire response from AA
     return return_value
 
 
-def _signin_silently(authority, client_id, scopes, **kwargs):
+def _get_new_correlation_id():
+    return str(uuid.uuid4())
+
+
+def _signin_silently(authority, client_id, scopes, correlation_id=None, **kwargs):
     params = pymsalruntime.MSALRuntimeAuthParameters(client_id, authority)
     params.set_requested_scopes(scopes)
     callback_data = _CallbackData()
@@ -87,7 +92,7 @@ def _signin_silently(authority, client_id, scopes, **kwargs):
             params.set_additional_parameter(k, str(v))
     pymsalruntime.signin_silently(
         params,
-        "correlation", # TODO
+        correlation_id or _get_new_correlation_id(),
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()
     return _convert_result(callback_data.auth_result, client_id)
@@ -99,6 +104,7 @@ def _signin_interactively(
         prompt=None,
         login_hint=None,
         claims=None,
+        correlation_id=None,
         **kwargs):
     params = pymsalruntime.MSALRuntimeAuthParameters(client_id, authority)
     params.set_requested_scopes(scopes)
@@ -117,8 +123,7 @@ def _signin_interactively(
             params.set_select_account_option(
                 pymsalruntime.SelectAccountOption.SHOWLOCALACCOUNTSCONTROL)
         else:
-            # TODO: MSAL Python might need to error out on other prompt values
-            logger.warning("prompt=%s is not supported on this platform", prompt)
+            logger.warning("prompt=%s is not supported by this module", prompt)
     for k, v in kwargs.items():  # This can be used to support domain_hint, max_age, etc.
         if v is not None:
             params.set_additional_parameter(k, str(v))  # TODO: End-to-end test
@@ -128,14 +133,15 @@ def _signin_interactively(
     pymsalruntime.signin_interactively(
         window or pymsalruntime.get_console_window() or pymsalruntime.get_desktop_window(),  # Since pymsalruntime 0.2+
         params,
-        "correlation", # TODO
+        correlation_id or _get_new_correlation_id(),
         login_hint or "",
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()
     return _convert_result(callback_data.auth_result, client_id)
 
 
-def _acquire_token_silently(authority, client_id, account_id, scopes, claims=None):
+def _acquire_token_silently(
+        authority, client_id, account_id, scopes, claims=None, correlation_id=None):
     account = _read_account_by_id(account_id)
     error = account.get_error()
     if error:
@@ -149,7 +155,7 @@ def _acquire_token_silently(authority, client_id, account_id, scopes, claims=Non
     callback_data = _CallbackData()
     pymsalruntime.acquire_token_silently(
         params,
-        "correlation", # TODO
+        correlation_id or _get_new_correlation_id(),
         account.get_account(),
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()

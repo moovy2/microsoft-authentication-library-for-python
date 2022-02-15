@@ -1188,6 +1188,7 @@ class ClientApplication(object):
             authority,  # This can be different than self.authority
             force_refresh=False,  # type: Optional[boolean]
             claims_challenge=None,
+            correlation_id=None,
             **kwargs):
         access_token_from_cache = None
         if not (force_refresh or claims_challenge):  # Bypass AT when desired or using claims
@@ -1241,6 +1242,7 @@ class ClientApplication(object):
                         scopes,
                         claims=_merge_claims_challenge_and_capabilities(
                             self._client_capabilities, claims_challenge),
+                        correlation_id=correlation_id,
                         )
                     if response:  # The broker provided a decisive outcome for this account
                         return self._process_broker_response(  # Then we use it
@@ -1250,6 +1252,7 @@ class ClientApplication(object):
             result = _clean_up(self._acquire_token_silent_by_finding_rt_belongs_to_me_or_my_family(
                 authority, self._decorate_scope(scopes), account,
                 refresh_reason=refresh_reason, claims_challenge=claims_challenge,
+                correlation_id=correlation_id,
                 **kwargs))
             if (result and "error" not in result) or (not access_token_from_cache):
                 return result
