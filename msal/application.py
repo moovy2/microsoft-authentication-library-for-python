@@ -1621,7 +1621,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
         """
         claims = _merge_claims_challenge_and_capabilities(
             self._client_capabilities, claims_challenge)
-        if self._enable_broker:
+        if self._enable_broker and max_age is None:  # TODO: max_age support is not yet implemented
             try:
                 from .broker import _signin_interactively, RedirectUriError
                 if extra_scopes_to_consent:  # TODO: Not supported in broker
@@ -1641,7 +1641,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                     login_hint=login_hint,
                     prompt=prompt,
                     claims=claims,
-                    max_age=max_age,  # TODO: MSAL Python need to validate the auth_time
+                    max_age=max_age,  # TODO: MSAL Python or broker need to validate the auth_time
                     )
                 return self._process_broker_response(response, scopes, kwargs.get("data", {}))
             except ImportError:
