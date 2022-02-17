@@ -134,7 +134,7 @@ def _signin_interactively(
         window or pymsalruntime.get_console_window() or pymsalruntime.get_desktop_window(),  # Since pymsalruntime 0.2+
         params,
         correlation_id or _get_new_correlation_id(),
-        login_hint or "",
+        login_hint,  # None value will be accepted since pymsalruntime 0.3+
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()
     return _convert_result(callback_data.auth_result, client_id)
