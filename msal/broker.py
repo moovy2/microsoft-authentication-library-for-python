@@ -45,12 +45,12 @@ def _convert_error(error, client_id):
         }
 
 
-def _read_account_by_id(account_id):
+def _read_account_by_id(account_id, correlation_id):
     """Return the callback result which contains the account or error"""
     callback_data = _CallbackData()
     pymsalruntime.read_account_by_id(
         account_id,
-        "correlation_id",
+        correlation_id,
         lambda result, callback_data=callback_data: callback_data.complete(result)
         )
     callback_data.signal.wait()
@@ -142,7 +142,8 @@ def _signin_interactively(
 
 def _acquire_token_silently(
         authority, client_id, account_id, scopes, claims=None, correlation_id=None):
-    account = _read_account_by_id(account_id)
+    correlation_id = correlation_id or _get_new_correlation_id()
+    account = _read_account_by_id(account_id, correlation_id)
     error = account.get_error()
     if error:
         return _convert_error(error, client_id)
@@ -155,7 +156,7 @@ def _acquire_token_silently(
     callback_data = _CallbackData()
     pymsalruntime.acquire_token_silently(
         params,
-        correlation_id or _get_new_correlation_id(),
+        correlation_id,
         account.get_account(),
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()
@@ -175,7 +176,8 @@ def _acquire_token_interactively(
         window=None,
         **kwargs):
     raise NotImplementedError("We ended up not currently using this function")
-    account = _read_account_by_id(account_id)
+    correlation_id = correlation_id or _get_new_correlation_id()
+    account = _read_account_by_id(account_id, correlation_id)
     error = account.get_error()
     if error:
         return _convert_error(error, client_id)
@@ -190,7 +192,7 @@ def _acquire_token_interactively(
     pymsalruntime.acquire_token_interactively(
         window or pymsalruntime.get_console_window() or pymsalruntime.get_desktop_window(),  # Since pymsalruntime 0.2+
         params,
-        correlation_id or _get_new_correlation_id(),
+        correlation_id,
         account.get_account(),
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()
