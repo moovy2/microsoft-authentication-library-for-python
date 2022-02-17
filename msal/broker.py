@@ -109,7 +109,7 @@ def _signin_interactively(
     params = pymsalruntime.MSALRuntimeAuthParameters(client_id, authority)
     params.set_requested_scopes(scopes)
     params.set_redirect_uri("placeholder")  # pymsalruntime 0.1 requires non-empty str,
-        # the actual redirect_uri will be a value hardcoded by the underlying WAM
+        # the actual redirect_uri will be overridden by a value hardcoded by the broker
     if prompt:
         if prompt == "select_account":
             if login_hint:
@@ -183,6 +183,8 @@ def _acquire_token_interactively(
         return _convert_error(error, client_id)
     params = pymsalruntime.MSALRuntimeAuthParameters(client_id, authority)
     params.set_requested_scopes(scopes)
+    params.set_redirect_uri("placeholder")  # pymsalruntime 0.1 requires non-empty str,
+        # the actual redirect_uri will be overridden by a value hardcoded by the broker
     if claims:
         params.set_decoded_claims(claims)
     for k, v in kwargs.items():  # This can be used to support domain_hint, max_age, etc.
