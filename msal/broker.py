@@ -12,7 +12,16 @@ import uuid
 import pymsalruntime  # ImportError would be raised on unsupported platforms such as Windows 8
     # Its API description is available in site-packages/pymsalruntime/PyMsalRuntime.pyi
 
+
 logger = logging.getLogger(__name__)
+pymsalruntime.set_logging_callback(lambda message, level: {  # New in pymsalruntime 0.5.0
+    pymsalruntime.LogLevel.TRACE: logger.debug,  # Python has no TRACE level
+    pymsalruntime.LogLevel.DEBUG: logger.debug,
+    pymsalruntime.LogLevel.INFO: logger.info,
+    pymsalruntime.LogLevel.WARNING: logger.warning,
+    pymsalruntime.LogLevel.ERROR: logger.error,
+    pymsalruntime.LogLevel.FATAL: logger.critical,
+    }.get(level, logger.warning)(message))
 
 
 class RedirectUriError(ValueError):
