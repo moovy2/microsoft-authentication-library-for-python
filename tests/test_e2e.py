@@ -258,7 +258,7 @@ class SshCertTestCase(E2eTestCase):
 
     @unittest.skipUnless(
         msal.application._is_running_in_cloud_shell(),
-        "Manually run this by python -m unittest tests.test_e2e.SshCertTestCase")
+        "Manually run this test case from inside Cloud Shell")
     def test_ssh_cert_for_user_silent_inside_cloud_shell(self):
         app = msal.PublicClientApplication("client_id_wont_matter")
         accounts = app.get_accounts()
@@ -267,6 +267,23 @@ class SshCertTestCase(E2eTestCase):
             self.SCOPE, account=accounts[0], data=self.DATA1)
         self.assertEqual(
             "ssh-cert", result.get("token_type"), "Unexpected result: %s" % result)
+        self.assertIsNotNone(result.get("access_token"))
+
+
+@unittest.skipUnless(
+    msal.application._is_running_in_cloud_shell(),
+    "Manually run this test case from inside Cloud Shell")
+class CloudShellTestCase(E2eTestCase):
+    app = msal.PublicClientApplication("client_id_wont_matter")
+    # Scopes came from https://msazure.visualstudio.com/One/_git/compute-CloudShell?path=/src/images/agent/env/envconfig.PROD.json&version=GBmaster&_a=contents
+    scope_that_requires_no_managed_device = "https://management.core.windows.net/"
+    def test_access_token_should_be_obtained_for_a_supported_scope(self):
+        accounts = self.app.get_accounts()
+        self.assertNotEqual([], accounts)
+        result = self.app.acquire_token_silent_with_error(
+            [self.scope_that_requires_no_managed_device], account=accounts[0])
+        self.assertEqual(
+            "Bearer", result.get("token_type"), "Unexpected result: %s" % result)
         self.assertIsNotNone(result.get("access_token"))
 
 
