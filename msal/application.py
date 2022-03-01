@@ -1234,7 +1234,7 @@ class ClientApplication(object):
                     and account is not None  # MSAL Python requires this
                     ):
                 try:
-                    from .broker import _acquire_token_silently
+                    from .broker import _acquire_token_silently, RedirectUriError
                     response = _acquire_token_silently(
                         "https://{}/{}".format(self.authority.instance, self.authority.tenant),
                         self.client_id,
@@ -1249,6 +1249,8 @@ class ClientApplication(object):
                             response, scopes, kwargs.get("data", {}))
                 except ImportError:
                     logger.warning("PyMsalRuntime is not available")
+                except RedirectUriError as e:  # Broker implicitly uses its own redirect_uri
+                    logger.warning(str(e) + " Now we fallback to use non-broker.")
             result = _clean_up(self._acquire_token_silent_by_finding_rt_belongs_to_me_or_my_family(
                 authority, self._decorate_scope(scopes), account,
                 refresh_reason=refresh_reason, claims_challenge=claims_challenge,
@@ -1470,7 +1472,7 @@ class ClientApplication(object):
                 return self._process_broker_response(response, scopes, kwargs.get("data", {}))
             except ImportError:
                 logger.warning("PyMsalRuntime is not available")
-            except RedirectUriError as e:  # Experimental: Catch, log, and fallback
+            except RedirectUriError as e:  # Broker implicitly uses its own redirect_uri
                 logger.warning(str(e) + " Now we fallback to use non-broker.")
 
         scopes = self._decorate_scope(scopes)
@@ -1657,7 +1659,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                 return self._process_broker_response(response, scopes, kwargs.get("data", {}))
             except ImportError:
                 logger.warning("PyMsalRuntime is not available")
-            except RedirectUriError as e:  # Experimental: Catch, log, and fallback
+            except RedirectUriError as e:  # Broker implicitly uses its own redirect_uri
                 logger.warning(str(e) + " Now we fallback to use browser.")
 
         self._validate_ssh_cert_input_data(kwargs.get("data", {}))
