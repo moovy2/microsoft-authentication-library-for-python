@@ -1635,7 +1635,16 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
             self._client_capabilities, claims_challenge)
         if self._enable_broker and max_age is None:  # TODO: max_age support is not yet implemented
             try:
-                from .broker import _signin_interactively, RedirectUriError
+                from .broker import _signin_interactively, RedirectUriError, _signin_silently
+                authority = "https://{}/{}".format(
+                    self.authority.instance, self.authority.tenant)
+                if prompt == "select_account":
+                    _signin_silently(  # To detect a RedirectUriError without prompt
+                        authority,
+                        self.client_id,
+                        scopes,
+                        validateAuthority="no",
+                        )
                 if extra_scopes_to_consent:  # TODO: Not supported in broker
                     logger.warning(
                         "Ignoring parameter extra_scopes_to_consent, "
@@ -1643,7 +1652,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                 if "welcome_template" in kwargs:
                     logger.debug(kwargs["welcome_template"])  # Experimental
                 response = _signin_interactively(
-                    "https://{}/{}".format(self.authority.instance, self.authority.tenant),
+                    authority,
                     self.client_id,
                     scopes,
                     validateAuthority="no"
