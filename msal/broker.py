@@ -17,11 +17,12 @@ logger = logging.getLogger(__name__)
 pymsalruntime.set_logging_callback(lambda message, level: {  # New in pymsalruntime 0.5.0
     pymsalruntime.LogLevel.TRACE: logger.debug,  # Python has no TRACE level
     pymsalruntime.LogLevel.DEBUG: logger.debug,
-    pymsalruntime.LogLevel.INFO: logger.info,
-    pymsalruntime.LogLevel.WARNING: logger.warning,
-    pymsalruntime.LogLevel.ERROR: logger.error,
+    # Let broker's excess info, warning and error logs map into default DEBUG, for now
+    #pymsalruntime.LogLevel.INFO: logger.info,
+    #pymsalruntime.LogLevel.WARNING: logger.warning,
+    #pymsalruntime.LogLevel.ERROR: logger.error,
     pymsalruntime.LogLevel.FATAL: logger.critical,
-    }.get(level, logger.warning)(message))
+    }.get(level, logger.debug)(message))
 
 
 class RedirectUriError(ValueError):
