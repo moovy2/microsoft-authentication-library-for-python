@@ -136,7 +136,7 @@ def _signin_interactively(
             logger.warning("prompt=%s is not supported by this module", prompt)
     for k, v in kwargs.items():  # This can be used to support domain_hint, max_age, etc.
         if v is not None:
-            params.set_additional_parameter(k, str(v))  # TODO: End-to-end test
+            params.set_additional_parameter(k, str(v))
     if claims:
         params.set_decoded_claims(claims)
     callback_data = _CallbackData()
