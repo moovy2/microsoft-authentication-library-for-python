@@ -9,8 +9,12 @@ import json
 import logging
 import uuid
 
-import pymsalruntime  # ImportError would be raised on unsupported platforms such as Windows 8
+try:
+    import pymsalruntime  # ImportError would be raised on unsupported platforms such as Windows 8
     # Its API description is available in site-packages/pymsalruntime/PyMsalRuntime.pyi
+except ImportError:
+    # TODO: What if "unsupported Windows8" error also hits this code path?
+    raise ImportError("""You need to install dependency by 'pip install "msal[broker]>=1.18,<2"'""")
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +49,8 @@ def _convert_error(error, client_id):
         raise RedirectUriError(  # This would be seen by either the app developer or end user
             "MsalRuntime won't work unless this one more redirect_uri is registered to current app: "
             "ms-appx-web://Microsoft.AAD.BrokerPlugin/{}".format(client_id))
+        # OTOH, AAD would emit other errors when other error handling branch was hit first,
+        # so, the AADSTS50011/RedirectUriError is not guaranteed to happen.
     return {
         "error": "broker_error",  # Note: Broker implies your device needs to be compliant.
             # You may use "dsregcmd /status" to check your device state

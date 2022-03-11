@@ -177,6 +177,7 @@ class ClientApplication(object):
                 # when we would eventually want to add this feature to PCA in future.
             exclude_scopes=None,
             http_cache=None,
+            enable_broker=None,
             ):
         """Create an instance of application.
 
@@ -412,6 +413,34 @@ class ClientApplication(object):
             Personally Identifiable Information (PII). Encryption is unnecessary.
 
             New in version 1.16.0.
+
+        :param boolean enable_broker:
+            Brokers provide Single-Sign-On, device identification,
+            and application identification verification.
+            If this parameter is set to True,
+            MSAL will use the broker and return either a token or an error,
+            when your scenario is supported by a broker,
+            otherwise it will automatically fall back to non-broker behavior.
+            This also means you could set this flag as True universally,
+            as long as your app meets the following prerequisite:
+
+            * Installed optional dependency, e.g. ``pip install msal[broker]>=1.18,<2``.
+              (Note that broker is currently only available on Windows 10+)
+
+            * Register a new redirect_uri for your desktop app as:
+              ``ms-appx-web://Microsoft.AAD.BrokerPlugin/your_client_id``
+
+            * Tested your app in following scenarios:
+
+              * Windows 10+
+
+              * PublicClientApplication's following methods::
+                acquire_token_interactive(), acquire_token_by_username_password(),
+                acquire_token_silent() (or acquire_token_silent_with_error()).
+
+              * AAD and MSA accounts (i.e. Non-ADFS, non-B2C)
+
+            New in version 1.18.0.
         """
         self.client_id = client_id
         self.client_credential = client_credential
@@ -471,8 +500,10 @@ class ClientApplication(object):
             else:
                 raise
         is_confidential_app = bool(
-                isinstance(self, ConfidentialClientApplication) or self.client_credential)
-        self._enable_broker = (not is_confidential_app
+            isinstance(self, ConfidentialClientApplication) or self.client_credential)
+        if is_confidential_app and enable_broker:
+            raise ValueError("enable_broker=True is only supported in PublicClientApplication")
+        self._enable_broker = (enable_broker and not is_confidential_app
             and sys.platform == "win32"
             and not self.authority.is_adfs and not self.authority._is_b2c)
 
@@ -1227,14 +1258,12 @@ class ClientApplication(object):
             refresh_reason = msal.telemetry.FORCE_REFRESH  # TODO: It could also mean claims_challenge
         assert refresh_reason, "It should have been established at this point"
         try:
-            if (
-                    self._enable_broker
-                        # If interactive flow or ROPC were not through broker,
-                        # the _acquire_token_silently() is unlikely to locate the account.
-                    and account is not None  # MSAL Python requires this
-                    ):
+            if self._enable_broker and account is not None:
                 try:
-                    from .broker import _acquire_token_silently, RedirectUriError
+                    from .broker import _acquire_token_silently
+                except RuntimeError:  # TODO: TBD
+                    logger.debug("Broker is unavailable on this platform. Fallback to non-broker.")
+                else:
                     response = _acquire_token_silently(
                         "https://{}/{}".format(self.authority.instance, self.authority.tenant),
                         self.client_id,
@@ -1247,10 +1276,7 @@ class ClientApplication(object):
                     if response:  # The broker provided a decisive outcome for this account
                         return self._process_broker_response(  # Then we use it
                             response, scopes, kwargs.get("data", {}))
-                except ImportError:
-                    logger.warning("PyMsalRuntime is not available")
-                except RedirectUriError as e:  # Broker implicitly uses its own redirect_uri
-                    logger.warning(str(e) + " Now we fallback to use non-broker.")
+
             result = _clean_up(self._acquire_token_silent_by_finding_rt_belongs_to_me_or_my_family(
                 authority, self._decorate_scope(scopes), account,
                 refresh_reason=refresh_reason, claims_challenge=claims_challenge,
@@ -1456,7 +1482,10 @@ class ClientApplication(object):
                 self._client_capabilities, claims_challenge)
         if self._enable_broker:
             try:
-                from .broker import _signin_silently, RedirectUriError
+                from .broker import _signin_silently
+            except RuntimeError:  # TODO: TBD
+                logger.debug("Broker is unavailable on this platform. Fallback to non-broker.")
+            else:
                 response = _signin_silently(
                     "https://{}/{}".format(self.authority.instance, self.authority.tenant),
                     self.client_id,
@@ -1470,10 +1499,6 @@ class ClientApplication(object):
                     claims=claims,
                     )
                 return self._process_broker_response(response, scopes, kwargs.get("data", {}))
-            except ImportError:
-                logger.warning("PyMsalRuntime is not available")
-            except RedirectUriError as e:  # Broker implicitly uses its own redirect_uri
-                logger.warning(str(e) + " Now we fallback to use non-broker.")
 
         scopes = self._decorate_scope(scopes)
         telemetry_context = self._build_telemetry_context(
@@ -1635,16 +1660,10 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
             self._client_capabilities, claims_challenge)
         if self._enable_broker:
             try:
-                from .broker import _signin_interactively, RedirectUriError, _signin_silently
-                authority = "https://{}/{}".format(
-                    self.authority.instance, self.authority.tenant)
-                if prompt == "select_account":
-                    _signin_silently(  # To detect a RedirectUriError without prompt
-                        authority,
-                        self.client_id,
-                        scopes,
-                        validateAuthority="no",
-                        )
+                from .broker import _signin_interactively
+            except RuntimeError:  # TODO: TBD
+                logger.debug("Broker is unavailable on this platform. Fallback to non-broker.")
+            else:
                 if extra_scopes_to_consent:  # TODO: Not supported in broker
                     logger.warning(
                         "Ignoring parameter extra_scopes_to_consent, "
@@ -1652,7 +1671,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                 if "welcome_template" in kwargs:
                     logger.debug(kwargs["welcome_template"])  # Experimental
                 response = _signin_interactively(
-                    authority,
+                    "https://{}/{}".format(self.authority.instance, self.authority.tenant),
                     self.client_id,
                     scopes,
                     validateAuthority="no"
@@ -1666,10 +1685,6 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                     window=window,
                     )
                 return self._process_broker_response(response, scopes, kwargs.get("data", {}))
-            except ImportError:
-                logger.warning("PyMsalRuntime is not available")
-            except RedirectUriError as e:  # Broker implicitly uses its own redirect_uri
-                logger.warning(str(e) + " Now we fallback to use browser.")
 
         self._validate_ssh_cert_input_data(kwargs.get("data", {}))
         telemetry_context = self._build_telemetry_context(
