@@ -1,8 +1,5 @@
 """This module is an adaptor to the underlying broker.
-PyMsalRuntime is the package providing broker's functionality.
-
-PyMsalRuntime currently supports these Windows versions, listed in this MSFT internal link
-https://github.com/AzureAD/microsoft-authentication-library-for-cpp/pull/2406/files
+It relies on PyMsalRuntime which is the package providing broker's functionality.
 """
 from threading import Event
 import json
@@ -13,8 +10,12 @@ try:
     import pymsalruntime  # ImportError would be raised on unsupported platforms such as Windows 8
     # Its API description is available in site-packages/pymsalruntime/PyMsalRuntime.pyi
 except ImportError:
-    # TODO: What if "unsupported Windows8" error also hits this code path?
-    raise ImportError("""You need to install dependency by 'pip install "msal[broker]>=1.18,<2"'""")
+    # PyMsalRuntime currently supports these Windows versions, listed in this MSFT internal link
+    # https://github.com/AzureAD/microsoft-authentication-library-for-cpp/pull/2406/files
+    raise ImportError(  # TODO: Remove or adjust this line right before merging this PR
+        'You need to install dependency by: pip install "msal[broker] @ git+https://github.com/AzureAD/microsoft-authentication-library-for-python.git@wam"')
+    raise ImportError('You need to install dependency by: pip install "msal[broker]>=1.18,<2"')
+# Other exceptions (possibly RuntimeError) would be raised if its initialization fails
 
 
 logger = logging.getLogger(__name__)
