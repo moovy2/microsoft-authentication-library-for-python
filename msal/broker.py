@@ -6,28 +6,27 @@ import json
 import logging
 import uuid
 
+
+logger = logging.getLogger(__name__)
 try:
     import pymsalruntime  # ImportError would be raised on unsupported platforms such as Windows 8
     # Its API description is available in site-packages/pymsalruntime/PyMsalRuntime.pyi
-except ImportError:
+    pymsalruntime.set_logging_callback(lambda message, level: {  # New in pymsalruntime 0.5.0
+        pymsalruntime.LogLevel.TRACE: logger.debug,  # Python has no TRACE level
+        pymsalruntime.LogLevel.DEBUG: logger.debug,
+        # Let broker's excess info, warning and error logs map into default DEBUG, for now
+        #pymsalruntime.LogLevel.INFO: logger.info,
+        #pymsalruntime.LogLevel.WARNING: logger.warning,
+        #pymsalruntime.LogLevel.ERROR: logger.error,
+        pymsalruntime.LogLevel.FATAL: logger.critical,
+        }.get(level, logger.debug)(message))
+except (ImportError, AttributeError):  # AttributeError happens when a prior pymsalruntime uninstallation somehow leaved an empty folder behind
     # PyMsalRuntime currently supports these Windows versions, listed in this MSFT internal link
     # https://github.com/AzureAD/microsoft-authentication-library-for-cpp/pull/2406/files
     raise ImportError(  # TODO: Remove or adjust this line right before merging this PR
         'You need to install dependency by: pip install "msal[broker] @ git+https://github.com/AzureAD/microsoft-authentication-library-for-python.git@wam"')
     raise ImportError('You need to install dependency by: pip install "msal[broker]>=1.18,<2"')
 # Other exceptions (possibly RuntimeError) would be raised if its initialization fails
-
-
-logger = logging.getLogger(__name__)
-pymsalruntime.set_logging_callback(lambda message, level: {  # New in pymsalruntime 0.5.0
-    pymsalruntime.LogLevel.TRACE: logger.debug,  # Python has no TRACE level
-    pymsalruntime.LogLevel.DEBUG: logger.debug,
-    # Let broker's excess info, warning and error logs map into default DEBUG, for now
-    #pymsalruntime.LogLevel.INFO: logger.info,
-    #pymsalruntime.LogLevel.WARNING: logger.warning,
-    #pymsalruntime.LogLevel.ERROR: logger.error,
-    pymsalruntime.LogLevel.FATAL: logger.critical,
-    }.get(level, logger.debug)(message))
 
 
 class RedirectUriError(ValueError):
