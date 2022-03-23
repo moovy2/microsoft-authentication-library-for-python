@@ -5,7 +5,7 @@ import sys
 if not sys.platform.startswith("win"):
     raise unittest.SkipTest("Currently, our broker supports Windows")
 from msal.broker import (  # Import them after the platform check
-    _signin_interactively, _acquire_token_silently, RedirectUriError)
+    _signin_silently, _signin_interactively, _acquire_token_silently, RedirectUriError)
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -20,7 +20,7 @@ class BrokerTestCase(unittest.TestCase):
     _authority = "https://login.microsoftonline.com/common"
     _scopes = ["https://graph.microsoft.com/.default"]
 
-    def test_interactive_then_silent(self):
+    def test_signin_interactive_then_acquire_token_silent(self):
         result = _signin_interactively(self._authority, self._client_id, self._scopes)
         self.assertIsNotNone(result.get("access_token"), result)
 
@@ -44,4 +44,8 @@ class BrokerTestCase(unittest.TestCase):
         if "access_token" in result:
             result["access_token"] = "********"
         import pprint; pprint.pprint(result)
+
+    def test_signin_silently(self):
+        result = _signin_silently(self._authority, self._client_id, self._scopes)
+        self.assertIsNotNone(result.get("access_token"), result)
 

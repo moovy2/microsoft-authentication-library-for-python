@@ -1660,7 +1660,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
             self._client_capabilities, claims_challenge)
         if self._enable_broker:
             try:
-                from .broker import _signin_interactively
+                from .broker import _signin_interactively, _signin_silently
             except RuntimeError:  # TODO: TBD
                 logger.debug("Broker is unavailable on this platform. Fallback to non-broker.")
             else:
@@ -1670,20 +1670,29 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                         "which is not supported on current platform")
                 if "welcome_template" in kwargs:
                     logger.debug(kwargs["welcome_template"])  # Experimental
-                response = _signin_interactively(
-                    "https://{}/{}".format(self.authority.instance, self.authority.tenant),
-                    self.client_id,
-                    scopes,
-                    validateAuthority="no"
-                        if self.authority._validate_authority is False
-                        or self.authority.is_adfs or self.authority._is_b2c
-                        else None,
-                    login_hint=login_hint,
-                    prompt=prompt,
-                    claims=claims,
-                    max_age=max_age,  # Broker may choose to trust the auth_time returned by AAD
-                    window=window,
-                    )
+                authority = "https://{}/{}".format(
+                    self.authority.instance, self.authority.tenant)
+                validate_authority = ("no"
+                    if self.authority._validate_authority is False
+                    or self.authority.is_adfs or self.authority._is_b2c
+                    else None)
+                if (prompt and prompt != "none") or login_hint:
+                    response = _signin_interactively(
+                        authority, self.client_id, scopes,
+                        validateAuthority=validate_authority,
+                        login_hint=login_hint,
+                        prompt=prompt,
+                        claims=claims,
+                        max_age=max_age,  # Broker may choose to trust the auth_time returned by AAD
+                        window=window,
+                        )
+                else:
+                    response = _signin_silently(
+                        authority, self.client_id, scopes,
+                        validateAuthority=validate_authority,
+                        claims=claims,
+                        max_age=max_age,  # Broker may choose to trust the auth_time returned by AAD
+                        )
                 return self._process_broker_response(response, scopes, kwargs.get("data", {}))
 
         self._validate_ssh_cert_input_data(kwargs.get("data", {}))

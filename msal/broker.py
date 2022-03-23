@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 try:
     import pymsalruntime  # ImportError would be raised on unsupported platforms such as Windows 8
     # Its API description is available in site-packages/pymsalruntime/PyMsalRuntime.pyi
-    pymsalruntime.set_logging_callback(lambda message, level: {  # New in pymsalruntime 0.5.0
+    pymsalruntime.register_logging_callback(lambda message, level: {  # New in pymsalruntime 0.7
         pymsalruntime.LogLevel.TRACE: logger.debug,  # Python has no TRACE level
         pymsalruntime.LogLevel.DEBUG: logger.debug,
         # Let broker's excess info, warning and error logs map into default DEBUG, for now
@@ -99,9 +99,11 @@ def _get_new_correlation_id():
     return str(uuid.uuid4())
 
 
-def _signin_silently(authority, client_id, scopes, correlation_id=None, **kwargs):
+def _signin_silently(authority, client_id, scopes, correlation_id=None, claims=None, **kwargs):
     params = pymsalruntime.MSALRuntimeAuthParameters(client_id, authority)
     params.set_requested_scopes(scopes)
+    if claims:
+        params.set_decoded_claims(claims)
     callback_data = _CallbackData()
     for k, v in kwargs.items():  # This can be used to support domain_hint, max_age, etc.
         if v is not None:
@@ -136,8 +138,6 @@ def _signin_interactively(
                 # https://identitydivision.visualstudio.com/Engineering/_workitems/edit/1744492
                 login_hint = None  # Mimicing the AAD behavior
                 logger.warning("Using both select_account and login_hint is ambiguous. Ignoring login_hint.")
-            params.set_select_account_option(
-                pymsalruntime.SelectAccountOption.SHOWLOCALACCOUNTSCONTROL)
         else:
             logger.warning("prompt=%s is not supported by this module", prompt)
     for k, v in kwargs.items():  # This can be used to support domain_hint, max_age, etc.
