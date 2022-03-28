@@ -88,6 +88,7 @@ def _convert_result(result, client_id):  # Mimic an on-the-wire response from AA
         "id_token_claims": id_token_claims,
         "client_info": account.get_client_info(),
         "_account_id": account.get_account_id(),
+		"token_type": "Bearer",  # Hardcoded, for now. It is unavailable from broker.
         }.items() if v}
     granted_scopes = result.get_granted_scopes()  # New in pymsalruntime 0.3.x
     if granted_scopes:
