@@ -36,11 +36,11 @@ class RedirectUriError(ValueError):
 class _CallbackData:
     def __init__(self):
         self.signal = Event()
-        self.auth_result = None
+        self.result = None
 
-    def complete(self, auth_result):
+    def complete(self, result):
         self.signal.set()
-        self.auth_result = auth_result
+        self.result = result
 
 
 def _convert_error(error, client_id):
@@ -62,7 +62,7 @@ def _convert_error(error, client_id):
 
 
 def _read_account_by_id(account_id, correlation_id):
-    """Return the callback result which contains the account or error"""
+    """Return an instance of MSALRuntimeError or MSALRuntimeAccount, or None"""
     callback_data = _CallbackData()
     pymsalruntime.read_account_by_id(
         account_id,
@@ -70,7 +70,8 @@ def _read_account_by_id(account_id, correlation_id):
         lambda result, callback_data=callback_data: callback_data.complete(result)
         )
     callback_data.signal.wait()
-    return callback_data.auth_result
+    return (callback_data.result.get_error() or callback_data.result.get_account()
+        or None)  # None happens when the account was not created by broker
 
 
 def _convert_result(result, client_id):  # Mimic an on-the-wire response from AAD
@@ -114,7 +115,7 @@ def _signin_silently(authority, client_id, scopes, correlation_id=None, claims=N
         correlation_id or _get_new_correlation_id(),
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()
-    return _convert_result(callback_data.auth_result, client_id)
+    return _convert_result(callback_data.result, client_id)
 
 
 def _signin_interactively(
@@ -154,17 +155,16 @@ def _signin_interactively(
         login_hint,  # None value will be accepted since pymsalruntime 0.3+
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()
-    return _convert_result(callback_data.auth_result, client_id)
+    return _convert_result(callback_data.result, client_id)
 
 
 def _acquire_token_silently(
         authority, client_id, account_id, scopes, claims=None, correlation_id=None):
     correlation_id = correlation_id or _get_new_correlation_id()
     account = _read_account_by_id(account_id, correlation_id)
-    error = account.get_error()
-    if error:
-        return _convert_error(error, client_id)
-    if not account.get_account():  # It happens when the account was not created by broker
+    if isinstance(account, pymsalruntime.MSALRuntimeError):
+        return _convert_error(account, client_id)
+    if account is None:
         return
     params = pymsalruntime.MSALRuntimeAuthParameters(client_id, authority)
     params.set_requested_scopes(scopes)
@@ -174,10 +174,10 @@ def _acquire_token_silently(
     pymsalruntime.acquire_token_silently(
         params,
         correlation_id,
-        account.get_account(),
+        account,
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()
-    return _convert_result(callback_data.auth_result, client_id)
+    return _convert_result(callback_data.result, client_id)
 
 
 def _acquire_token_interactively(
@@ -195,9 +195,10 @@ def _acquire_token_interactively(
     raise NotImplementedError("We ended up not currently using this function")
     correlation_id = correlation_id or _get_new_correlation_id()
     account = _read_account_by_id(account_id, correlation_id)
-    error = account.get_error()
-    if error:
-        return _convert_error(error, client_id)
+    if isinstance(account, pymsalruntime.MSALRuntimeError):
+        return _convert_error(account, client_id)
+    if account is None:
+        return
     params = pymsalruntime.MSALRuntimeAuthParameters(client_id, authority)
     params.set_requested_scopes(scopes)
     params.set_redirect_uri("placeholder")  # pymsalruntime 0.1 requires non-empty str,
@@ -212,8 +213,27 @@ def _acquire_token_interactively(
         window or pymsalruntime.get_console_window() or pymsalruntime.get_desktop_window(),  # Since pymsalruntime 0.2+
         params,
         correlation_id,
-        account.get_account(),
+        account,
         lambda result, callback_data=callback_data: callback_data.complete(result))
     callback_data.signal.wait()
-    return callback_data.auth_result
+    return callback_data.result
+
+
+def _signout_silently(client_id, account_id, correlation_id=None):
+    correlation_id = correlation_id or _get_new_correlation_id()
+    account = _read_account_by_id(account_id, correlation_id)
+    if isinstance(account, pymsalruntime.MSALRuntimeError):
+        return _convert_error(account, client_id)
+    if account is None:
+        return
+    callback_data = _CallbackData()
+    pymsalruntime.signout_silently(  # New in PyMsalRuntime 0.7
+        client_id,
+        correlation_id,
+        account,
+        lambda result, callback_data=callback_data: callback_data.complete(result))
+    callback_data.signal.wait()
+    error = callback_data.result.get_error()
+    if error:
+        return _convert_error(error, client_id)
 
