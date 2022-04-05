@@ -1046,6 +1046,15 @@ class ClientApplication(object):
     def remove_account(self, account):
         """Sign me out and forget me from token cache"""
         self._forget_me(account)
+        if self._enable_broker:
+            try:
+                from .broker import _signout_silently
+            except RuntimeError:  # TODO: TBD
+                logger.debug("Broker is unavailable on this platform. Fallback to non-broker.")
+            else:
+                error = _signout_silently(self.client_id, account["local_account_id"])
+                if error:
+                    logger.debug("_signout_silently() returns error: %s", error)
 
     def _sign_out(self, home_account):
         # Remove all relevant RTs and ATs from token cache
@@ -1656,6 +1665,7 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
               and typically contains an "access_token" key.
             - A dict containing an "error" key, when token refresh failed.
         """
+        self._validate_ssh_cert_input_data(kwargs.get("data", {}))
         claims = _merge_claims_challenge_and_capabilities(
             self._client_capabilities, claims_challenge)
         if self._enable_broker:
@@ -1672,30 +1682,37 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                     logger.debug(kwargs["welcome_template"])  # Experimental
                 authority = "https://{}/{}".format(
                     self.authority.instance, self.authority.tenant)
-                validate_authority = ("no"
-                    if self.authority._validate_authority is False
-                    or self.authority.is_adfs or self.authority._is_b2c
+                validate_authority = (
+                    "no" if self.authority._validate_authority is False
+                        or self.authority.is_adfs or self.authority._is_b2c
                     else None)
-                if (prompt and prompt != "none") or login_hint:
-                    response = _signin_interactively(
-                        authority, self.client_id, scopes,
-                        validateAuthority=validate_authority,
-                        login_hint=login_hint,
-                        prompt=prompt,
-                        claims=claims,
-                        max_age=max_age,  # Broker may choose to trust the auth_time returned by AAD
-                        window=window,
-                        )
-                else:
+
+                # Call _signin_silently() and/or _signin_interactively()
+                if prompt == "none" or (not prompt and not login_hint):
                     response = _signin_silently(
                         authority, self.client_id, scopes,
                         validateAuthority=validate_authority,
                         claims=claims,
-                        max_age=max_age,  # Broker may choose to trust the auth_time returned by AAD
-                        )
+                        max_age=max_age,
+                        **kwargs.get("data", {}))
+                    import pymsalruntime
+                    if prompt == "none" or response.get("_broker_status") not in (
+                            pymsalruntime.Response_Status.Status_AccountUnusable,
+                            pymsalruntime.Response_Status.Status_InteractionRequired,
+                            ):
+                        return self._process_broker_response(
+                            response, scopes, kwargs.get("data", {}))
+                response = _signin_interactively(
+                    authority, self.client_id, scopes,
+                    validateAuthority=validate_authority,
+                    login_hint=login_hint,
+                    prompt=prompt,
+                    claims=claims,
+                    max_age=max_age,
+                    window=window,
+                    **kwargs.get("data", {}))
                 return self._process_broker_response(response, scopes, kwargs.get("data", {}))
 
-        self._validate_ssh_cert_input_data(kwargs.get("data", {}))
         telemetry_context = self._build_telemetry_context(
             self.ACQUIRE_TOKEN_INTERACTIVE)
         response = _clean_up(self.client.obtain_token_by_browser(
