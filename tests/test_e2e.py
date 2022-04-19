@@ -86,7 +86,7 @@ class E2eTestCase(unittest.TestCase):
         self.assertNotEqual(0, len(accounts))
         account = accounts[0]
         if ("scope" not in result_from_wire  # This is the usual case
-                or  # Authority server could reject some scopes
+                or  # Authority server could return different set of scopes
                 set(scope) <= set(result_from_wire["scope"].split(" "))
                 ):
             # Going to test acquire_token_silent(...) to locate an AT from cache
@@ -115,7 +115,7 @@ class E2eTestCase(unittest.TestCase):
             #   result_from_wire['access_token'] != result_from_cache['access_token']
             # but ROPC in B2C tends to return the same AT we obtained seconds ago.
             # Now looking back, "refresh_token grant would return a brand new AT"
-            # was just an empirical observation but never a committment in specs,
+            # was just an empirical observation but never a commitment in specs,
             # so we adjust our way to assert here.
             (result_from_cache or {}).get("access_token"),
             "We should get an AT from acquire_token_silent(...) call")
@@ -175,7 +175,7 @@ class E2eTestCase(unittest.TestCase):
             assertion=lambda: self.assertIn('access_token', result),
             skippable_errors=self.app.client.DEVICE_FLOW_RETRIABLE_ERRORS)
         if "access_token" not in result:
-            self.skip("End user did not complete Device Flow in time")
+            self.skipTest("End user did not complete Device Flow in time")
         self.assertCacheWorksForUser(result, scope, username=None)
         result["access_token"] = result["refresh_token"] = "************"
         logger.info(
@@ -560,6 +560,8 @@ class LabBasedTestCase(E2eTestCase):
     <li><a href="$auth_uri">Sign In</a> or <a href="$abort_uri">Abort</a></li>
     </ol></body></html>""".format(id=self.id(), username_uri=username_uri),
                 )
+        if auth_response is None:
+            self.skipTest("Timed out. Did not have test settings in hand? Prepare and retry.")
         self.assertIsNotNone(
             auth_response.get("code"), "Error: {}, Detail: {}".format(
                 auth_response.get("error"), auth_response))

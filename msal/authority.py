@@ -5,11 +5,6 @@ except ImportError:  # Fall back to Python 2
     from urlparse import urlparse
 import logging
 
-# Historically some customers patched this module-wide requests instance.
-# We keep it here for now. They will be removed in next major release.
-import requests
-import requests as _requests
-
 from .exceptions import MsalServiceError
 
 
@@ -27,7 +22,6 @@ WELL_KNOWN_AUTHORITY_HOSTS = set([
     AZURE_CHINA,
     'login-us.microsoftonline.com',
     AZURE_US_GOVERNMENT,
-    'login.microsoftonline.de',
     ])
 WELL_KNOWN_B2C_HOSTS = [
     "b2clogin.com",
@@ -59,9 +53,10 @@ class Authority(object):
     _domains_without_user_realm_discovery = set([])
 
     @property
-    def http_client(self):  # Obsolete. We will remove this in next major release.
-        # A workaround: if module-wide requests is patched, we honor it.
-        return self._http_client if requests is _requests else requests
+    def http_client(self):  # Obsolete. We will remove this eventually
+        warnings.warn(
+            "authority.http_client might be removed in MSAL Python 1.21+", DeprecationWarning)
+        return self._http_client
 
     def __init__(self, authority_url, http_client, validate_authority=True):
         """Creates an authority instance, and also validates it.
@@ -84,7 +79,7 @@ class Authority(object):
             payload = instance_discovery(
                 "https://{}{}/oauth2/v2.0/authorize".format(
                     self.instance, authority.path),
-                self.http_client)
+                self._http_client)
             if payload.get("error") == "invalid_instance":
                 raise ValueError(
                     "invalid_instance: "
@@ -104,12 +99,13 @@ class Authority(object):
         try:
             openid_config = tenant_discovery(
                 tenant_discovery_endpoint,
-                self.http_client)
+                self._http_client)
         except ValueError:
             raise ValueError(
                 "Unable to get authority configuration for {}. "
                 "Authority would typically be in a format of "
-                "https://login.microsoftonline.com/your_tenant_name".format(
+                "https://login.microsoftonline.com/your_tenant "
+                "Also please double check your tenant name or GUID is correct.".format(
                 authority_url))
         logger.debug("openid_config = %s", openid_config)
         self.authorization_endpoint = openid_config['authorization_endpoint']
@@ -123,7 +119,7 @@ class Authority(object):
         # "federation_protocol", "cloud_audience_urn",
         # "federation_metadata_url", "federation_active_auth_url", etc.
         if self.instance not in self.__class__._domains_without_user_realm_discovery:
-            resp = response or self.http_client.get(
+            resp = response or self._http_client.get(
                 "https://{netloc}/common/userrealm/{username}?api-version=1.0".format(
                     netloc=self.instance, username=username),
                 headers={'Accept': 'application/json',
@@ -170,7 +166,10 @@ def tenant_discovery(tenant_discovery_endpoint, http_client, **kwargs):
     if 400 <= resp.status_code < 500:
         # Nonexist tenant would hit this path
         # e.g. https://login.microsoftonline.com/nonexist_tenant/v2.0/.well-known/openid-configuration
-        raise ValueError("OIDC Discovery endpoint rejects our request")
+        raise ValueError(
+            "OIDC Discovery endpoint rejects our request. Error: {}".format(
+                resp.text  # Expose it as-is b/c OIDC defines no error response format
+            ))
     # Transient network error would hit this path
     resp.raise_for_status()
     raise RuntimeError(  # A fallback here, in case resp.raise_for_status() is no-op

@@ -11,8 +11,6 @@ import warnings
 from threading import Lock
 import os
 
-import requests
-
 from .oauth2cli import Client, JwtAssertionCreator
 from .oauth2cli.oidc import decode_part
 from .authority import Authority
@@ -28,7 +26,7 @@ from .cloudshell import _acquire_token as _acquire_token_by_cloud_shell
 
 
 # The __init__.py will import this. Not the other way around.
-__version__ = "1.16.0"
+__version__ = "1.17.0"  # When releasing, also check and bump our dependencies's versions if needed
 
 logger = logging.getLogger(__name__)
 CURRENT_USER = "Current User"  # The value is subject to change
@@ -84,6 +82,10 @@ def _preferred_browser():
     if sys.platform != "linux":  # On other platforms, we have no browser preference
         return None
     browser_path = "/usr/bin/microsoft-edge"  # Use a full path owned by sys admin
+        # Note: /usr/bin/microsoft-edge, /usr/bin/microsoft-edge-stable, etc.
+        # are symlinks that point to the actual binaries which are found under
+        # /opt/microsoft/msedge/msedge or /opt/microsoft/msedge-beta/msedge.
+        # Either method can be used to detect an Edge installation.
     user_has_no_preference = "BROWSER" not in os.environ
     user_wont_mind_edge = "microsoft-edge" in os.environ.get("BROWSER", "")  # Note:
         # BROWSER could contain "microsoft-edge" or "/path/to/microsoft-edge".
@@ -431,6 +433,8 @@ class ClientApplication(object):
         if http_client:
             self.http_client = http_client
         else:
+            import requests  # Lazy load
+
             self.http_client = requests.Session()
             self.http_client.verify = verify
             self.http_client.proxies = proxies
