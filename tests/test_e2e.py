@@ -275,10 +275,9 @@ class SshCertTestCase(E2eTestCase):
     "Manually run this test case from inside Cloud Shell")
 class CloudShellTestCase(E2eTestCase):
     app = msal.PublicClientApplication("client_id_wont_matter")
-    # Scopes came from https://msazure.visualstudio.com/One/_git/compute-CloudShell?path=/src/images/agent/env/envconfig.PROD.json&version=GBmaster&_a=contents
-    scope_that_requires_no_managed_device = "https://management.core.windows.net/"
+    scope_that_requires_no_managed_device = "https://management.core.windows.net/"  # Scopes came from https://msazure.visualstudio.com/One/_git/compute-CloudShell?path=/src/images/agent/env/envconfig.PROD.json&version=GBmaster&_a=contents
     def test_access_token_should_be_obtained_for_a_supported_scope(self):
-        accounts = self.app.get_accounts()
+        accounts = self.app.get_accounts(username=msal.CURRENT_USER)
         self.assertNotEqual([], accounts)
         result = self.app.acquire_token_silent_with_error(
             [self.scope_that_requires_no_managed_device], account=accounts[0])

@@ -30,6 +30,7 @@ from .application import (
     ClientApplication,
     ConfidentialClientApplication,
     PublicClientApplication,
+    CURRENT_USER,
     )
 from .oauth2cli.oidc import Prompt
 from .token_cache import TokenCache, SerializableTokenCache
