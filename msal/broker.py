@@ -104,6 +104,16 @@ def _get_new_correlation_id():
     return str(uuid.uuid4())
 
 
+def _enable_msa_pt_when_needed(params, client_id):
+    if client_id in [  # Experimental: Automatically enable MSA-PT mode for known MSA-PT apps
+			# More background of MSA-PT is available from this internal docs:
+			# https://microsoft.sharepoint.com/:w:/t/Identity-DevEx/EatIUauX3c9Ctw1l7AQ6iM8B5CeBZxc58eoQCE0IuZ0VFw?e=tgc3jP&CID=39c853be-76ea-79d7-ee73-f1b2706ede05
+            "04b07795-8ddb-461a-bbee-02f9e1bf7b46",  # Azure CLI
+            "04f0c124-f2bc-4f59-8241-bf6df9866bbd",  # Visual Studio
+            ]:
+        params.set_additional_parameter("msal_request_type", "consumer_passthrough")  # PyMsalRuntime 0.8+
+
+
 def _signin_silently(authority, client_id, scopes, correlation_id=None, claims=None, **kwargs):
     params = pymsalruntime.MSALRuntimeAuthParameters(client_id, authority)
     params.set_requested_scopes(scopes)
@@ -113,6 +123,7 @@ def _signin_silently(authority, client_id, scopes, correlation_id=None, claims=N
     for k, v in kwargs.items():  # This can be used to support domain_hint, max_age, etc.
         if v is not None:
             params.set_additional_parameter(k, str(v))
+    _enable_msa_pt_when_needed(params, client_id)
     pymsalruntime.signin_silently(
         params,
         correlation_id or _get_new_correlation_id(),
@@ -145,6 +156,7 @@ def _signin_interactively(
                 logger.warning("Using both select_account and login_hint is ambiguous. Ignoring login_hint.")
         else:
             logger.warning("prompt=%s is not supported by this module", prompt)
+    _enable_msa_pt_when_needed(params, client_id)
     for k, v in kwargs.items():  # This can be used to support domain_hint, max_age, etc.
         if v is not None:
             params.set_additional_parameter(k, str(v))
