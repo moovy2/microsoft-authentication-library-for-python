@@ -43,7 +43,7 @@ def _scope_to_resource(scope):
         "https://azuredatabricks.net/",
         "ce34e7e5-485f-4d76-964f-b3d2b16d1e4f",
         "https://azure-devices-provisioning.net"
-        ]
+        ]  # TODO: Cloud Shell IMDS will remove that list soon. What shall we do then?
     for a in cloud_shell_supported_audiences:
         if scope.startswith(a):  # This is an experimental approach
             return a
@@ -51,7 +51,6 @@ def _scope_to_resource(scope):
 
 
 def _acquire_token(http_client, scopes, **kwargs):
-    kwargs.pop("correlation_id", None)  # IMDS does not use correlation_id
     resp = http_client.post(
         "http://localhost:50342/oauth2/token",
         data=dict(
@@ -72,6 +71,11 @@ def _acquire_token(http_client, scopes, **kwargs):
         "expires_in": int(payload["expires_in"]),
         "token_type": payload.get("token_type", "Bearer"),
         }
+    ## Note: Decided to not surface resource back as scope,
+    ##       because they would cause the downstream OAuth2 code path to
+    ##       cache the token with a different scope and won't hit them later.
+    #if payload.get("resource"):
+    #    oauth2_response["scope"] = payload["resource"]
     if payload.get("refresh_token"):
         oauth2_response["refresh_token"] = payload["refresh_token"]
     return oauth2_response

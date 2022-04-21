@@ -982,7 +982,7 @@ class ClientApplication(object):
             # In Cloud Shell, user already signed in w/ an account johndoe@contoso.com
             # We pretend we have that account, for acquire_token_silent() to work.
             # Note: If user calls acquire_token_by_xyz() with same account later,
-            # the get_accounts() would return multiple accounts to calling app,
+            # the get_accounts(username=None) would return multiple accounts,
             # with different usernames: johndoe@contoso.com and CURRENT_USER.
             accounts.insert(0, cloud_shell_pseudo_account)
         # Does not further filter by existing RTs here. It probably won't matter.
@@ -1149,20 +1149,7 @@ class ClientApplication(object):
         assert isinstance(scopes, list), "Invalid parameter type"
         self._validate_ssh_cert_input_data(kwargs.get("data", {}))
 
-        # TODO: TBD
-        # Currently, the following implementation activates Cloud Shell (CS) code path
-        # when a pseudo account was specified.
-        # But when/if the user signs in explicitly (such as "az login") with SAME account,
-        # to obtain tokens with scope(s) not supported by Cloud Shell's IMDS,
-        # the user would end up with one real account and still one pseudo account,
-        # both with same username.
-        # It would become unrealistic for end user to reason why
-        # the pseudo "default user" account would go one code path,
-        # and the real account would go another.
-        # I will probably refactor to automatically group Cloud Shell's default account
-        # and the real account into one, if they have same username.
-        # And then, acquire_token_silent() will always try real account if RT is available,
-        # and fallback to the Cloud Shell code path.
+        # The special code path only for _CLOUD_SHELL_USER
         if account and account.get("home_account_id") == _CLOUD_SHELL_USER:
             # Since we don't currently store cloud shell tokens in MSAL's cache,
             # we can have a shortcut here, and semantically bypass all those
