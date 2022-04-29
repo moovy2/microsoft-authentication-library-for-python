@@ -18,7 +18,7 @@ class BrokerTestCase(unittest.TestCase):
     It currently hardcodes some test apps which might be changed/gone in the future.
     The existing test_e2e.py is sophisticated to pull test configuration securely from lab.
     """
-    _client_id = "26a7ee05-5602-4d76-a7ba-eae8b7b67941"  # A pre-configured test app
+    _client_id = "04f0c124-f2bc-4f59-8241-bf6df9866bbd"  # Visual Studio
     _authority = "https://login.microsoftonline.com/common"
     _scopes = ["https://graph.microsoft.com/.default"]
 
