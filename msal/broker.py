@@ -45,7 +45,10 @@ class _CallbackData:
 
 def _convert_error(error, client_id):
     context = error.get_context()  # Available since pymsalruntime 0.0.4
-    if "AADSTS50011" in context:  # In WAM, this could happen on both interactive and silent flows
+    if (
+            "AADSTS50011" in context  # In WAM, this could happen on both interactive and silent flows
+            or "AADSTS7000218" in context  # This "request body must contain ... client_secret" is just a symptom of current app has no WAM redirect_uri
+            ):
         raise RedirectUriError(  # This would be seen by either the app developer or end user
             "MsalRuntime won't work unless this one more redirect_uri is registered to current app: "
             "ms-appx-web://Microsoft.AAD.BrokerPlugin/{}".format(client_id))
