@@ -177,7 +177,7 @@ class ClientApplication(object):
                 # when we would eventually want to add this feature to PCA in future.
             exclude_scopes=None,
             http_cache=None,
-            enable_broker=None,
+            allow_broker=None,
             ):
         """Create an instance of application.
 
@@ -414,7 +414,7 @@ class ClientApplication(object):
 
             New in version 1.16.0.
 
-        :param boolean enable_broker:
+        :param boolean allow_broker:
             Brokers provide Single-Sign-On, device identification,
             and application identification verification.
             If this parameter is set to True,
@@ -501,9 +501,9 @@ class ClientApplication(object):
                 raise
         is_confidential_app = bool(
             isinstance(self, ConfidentialClientApplication) or self.client_credential)
-        if is_confidential_app and enable_broker:
-            raise ValueError("enable_broker=True is only supported in PublicClientApplication")
-        self._enable_broker = (enable_broker and not is_confidential_app
+        if is_confidential_app and allow_broker:
+            raise ValueError("allow_broker=True is only supported in PublicClientApplication")
+        self._enable_broker = (allow_broker and not is_confidential_app
             and sys.platform == "win32"
             and not self.authority.is_adfs and not self.authority._is_b2c)
 

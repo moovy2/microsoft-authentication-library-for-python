@@ -143,7 +143,7 @@ def main():
             header="Input authority (Note that MSA-PT apps would NOT use the /common authority)",
             accept_nonempty_string=True,
             ),
-        enable_broker=_input_boolean("Enable broker? (Azure CLI currently only supports @microsoft.com accounts when enabling broker)"),
+        allow_broker=_input_boolean("Allow broker? (Azure CLI currently only supports @microsoft.com accounts when enabling broker)"),
         )
     if _input_boolean("Enable MSAL Python's DEBUG log?"):
         logging.basicConfig(level=logging.DEBUG)

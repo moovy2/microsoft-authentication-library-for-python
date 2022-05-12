@@ -155,7 +155,7 @@ class E2eTestCase(unittest.TestCase):
             authority=authority,
             azure_region=azure_region,
             http_client=http_client or MinimalHttpClient(),
-            enable_broker=broker_available  # This way, we reuse same test cases, by run them with and without broker
+            allow_broker=broker_available  # This way, we reuse same test cases, by run them with and without broker
                 and not client_credential,
             )
 
