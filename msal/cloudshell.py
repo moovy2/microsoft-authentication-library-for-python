@@ -53,11 +53,19 @@ def _acquire_token(http_client, scopes, client_id=None, data=None):
             "error_description": cs_error.get("message"),
             }.items() if v}
     imds_payload = json.loads(resp.text)
+    BEARER = "Bearer"
     oauth2_response = {
         "access_token": imds_payload["access_token"],
         "expires_in": int(imds_payload["expires_in"]),
-        "token_type": imds_payload.get("token_type", "Bearer"),
+        "token_type": imds_payload.get("token_type", BEARER),
         }
+    expected_token_type = (data or {}).get("token_type", BEARER)
+    if oauth2_response["token_type"] != expected_token_type:
+        return {  # Generate a normal error (rather than an intrusive exception)
+            "error": "broker_error",
+            "error_description": "token_type {} is not supported by this version of Azure Portal".format(
+                expected_token_type),
+            }
     parts = imds_payload["access_token"].split(".")
 
     # The following default values are useful in SSH Cert scenario
