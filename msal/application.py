@@ -1598,7 +1598,6 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
             extra_scopes_to_consent=None,
             max_age=None,
             window=None,
-            enable_msa_passthrough=None,
             **kwargs):
         """Acquire token interactively i.e. via a local browser.
 
@@ -1661,13 +1660,6 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
             you are recommended to also provide its window handle,
             so that the sign in UI window will properly pop up on top of your window.
 
-        :param boolean enable_msa_passthrough:
-            OPTIONAL. MSA-Passthrough is a legacy configuration,
-            needed by a small amount of Microsoft first-party apps,
-            which would login MSA accounts via ".../organizations" authority.
-            If you app belongs to this category, AND you are enabling broker,
-            you would want to enable this flag. Default value is equivalent to False.
-
         :return:
             - A dict containing no "error" key,
               and typically contains an "access_token" key.
@@ -1694,13 +1686,21 @@ class PublicClientApplication(ClientApplication):  # browser app or mobile app
                     "no" if self.authority._validate_authority is False
                         or self.authority.is_adfs or self.authority._is_b2c
                     else None)
-                enable_msa_passthrough = self.client_id in [
-                    # Experimental: Automatically enable MSA-PT mode for known MSA-PT apps
-                    # More background of MSA-PT is available from this internal docs:
-                    # https://microsoft.sharepoint.com/:w:/t/Identity-DevEx/EatIUauX3c9Ctw1l7AQ6iM8B5CeBZxc58eoQCE0IuZ0VFw?e=tgc3jP&CID=39c853be-76ea-79d7-ee73-f1b2706ede05
-                    "04b07795-8ddb-461a-bbee-02f9e1bf7b46",  # Azure CLI
-                    "04f0c124-f2bc-4f59-8241-bf6df9866bbd",  # Visual Studio
-                    ] if enable_msa_passthrough is None else enable_msa_passthrough
+                enable_msa_passthrough = kwargs.get(
+                    "enable_msa_passthrough",  # Keep it as a hidden param, for now.
+                        # OPTIONAL. MSA-Passthrough is a legacy configuration,
+                        # needed by a small amount of Microsoft first-party apps,
+                        # which would login MSA accounts via ".../organizations" authority.
+                        # If you app belongs to this category, AND you are enabling broker,
+                        # you would want to enable this flag. Default value is equivalent to False.
+                    self.client_id in [
+                        # Experimental: Automatically enable MSA-PT mode for known MSA-PT apps
+                        # More background of MSA-PT is available from this internal docs:
+                        # https://microsoft.sharepoint.com/:w:/t/Identity-DevEx/EatIUauX3c9Ctw1l7AQ6iM8B5CeBZxc58eoQCE0IuZ0VFw?e=tgc3jP&CID=39c853be-76ea-79d7-ee73-f1b2706ede05
+                        "04b07795-8ddb-461a-bbee-02f9e1bf7b46",  # Azure CLI
+                        "04f0c124-f2bc-4f59-8241-bf6df9866bbd",  # Visual Studio
+                        ]
+                    )
                 # Call _signin_silently() and/or _signin_interactively()
                 if prompt == "none" or (not prompt and not login_hint):
                     response = _signin_silently(
