@@ -185,12 +185,14 @@ class E2eTestCase(unittest.TestCase):
             self, client_id=None, authority=None, scope=None, port=None,
             username_uri="",  # But you would want to provide one
             data=None,  # Needed by ssh-cert feature
+            prompt=None,
             **ignored):
         assert client_id and authority and scope
         self.app = msal.PublicClientApplication(
             client_id, authority=authority, http_client=MinimalHttpClient())
         result = self.app.acquire_token_interactive(
             scope,
+            prompt=prompt,
             timeout=120,
             port=port,
             welcome_template=  # This is an undocumented feature for testing
@@ -229,9 +231,6 @@ class SshCertTestCase(E2eTestCase):
         self.assertEqual("ssh-cert", result["token_type"])
 
     @unittest.skipIf(os.getenv("TRAVIS"), "Browser automation is not yet implemented")
-    @unittest.skipIf(
-        msal.application._is_running_in_cloud_shell(),
-        "The test app does not opt in to Cloud Shell")
     def test_ssh_cert_for_user(self):
         result = self._test_acquire_token_interactive(
             client_id="04b07795-8ddb-461a-bbee-02f9e1bf7b46",  # Azure CLI is one
@@ -240,6 +239,7 @@ class SshCertTestCase(E2eTestCase):
             scope=self.SCOPE,
             data=self.DATA1,
             username_uri="https://msidlab.com/api/user?usertype=cloud",
+            prompt="none" if msal.application._is_running_in_cloud_shell() else None,
             )   # It already tests reading AT from cache, and using RT to refresh
                 # acquire_token_silent() would work because we pass in the same key
         self.assertIsNotNone(result.get("access_token"), "Encountered {}: {}".format(
@@ -256,31 +256,16 @@ class SshCertTestCase(E2eTestCase):
         self.assertEqual(refreshed_ssh_cert["token_type"], "ssh-cert")
         self.assertNotEqual(result["access_token"], refreshed_ssh_cert['access_token'])
 
-    @unittest.skipUnless(
-        msal.application._is_running_in_cloud_shell(),
-        "Manually run this test case from inside Cloud Shell")
-    def test_ssh_cert_for_user_silent_inside_cloud_shell(self):
-        app = msal.PublicClientApplication("client_id_wont_matter")
-        accounts = app.get_accounts()
-        self.assertNotEqual([], accounts)
-        result = app.acquire_token_silent_with_error(
-            self.SCOPE, account=accounts[0], data=self.DATA1)
-        self.assertEqual(
-            "ssh-cert", result.get("token_type"), "Unexpected result: %s" % result)
-        self.assertIsNotNone(result.get("access_token"))
-
 
 @unittest.skipUnless(
     msal.application._is_running_in_cloud_shell(),
     "Manually run this test case from inside Cloud Shell")
 class CloudShellTestCase(E2eTestCase):
-    app = msal.PublicClientApplication("client_id_wont_matter")
+    app = msal.PublicClientApplication("client_id")
     scope_that_requires_no_managed_device = "https://management.core.windows.net/"  # Scopes came from https://msazure.visualstudio.com/One/_git/compute-CloudShell?path=/src/images/agent/env/envconfig.PROD.json&version=GBmaster&_a=contents
     def test_access_token_should_be_obtained_for_a_supported_scope(self):
-        accounts = self.app.get_accounts(username=msal.CURRENT_USER)
-        self.assertNotEqual([], accounts)
-        result = self.app.acquire_token_silent_with_error(
-            [self.scope_that_requires_no_managed_device], account=accounts[0])
+        result = self.app.acquire_token_interactive(
+            [self.scope_that_requires_no_managed_device], prompt="none")
         self.assertEqual(
             "Bearer", result.get("token_type"), "Unexpected result: %s" % result)
         self.assertIsNotNone(result.get("access_token"))
