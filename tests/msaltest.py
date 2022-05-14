@@ -74,7 +74,7 @@ def _acquire_token_interactive(app, scopes, data=None):
         # login_hint is unnecessary when prompt=select_account,
         # but we still let tester input login_hint, just for testing purpose.
         [None] + [a["username"] for a in app.get_accounts()],
-        header="login_hint? (If you have multiple signed-in sessions in browser, and you specify a login_hint to match one of them, you will bypass the account picker.)",
+        header="login_hint? (If you have multiple signed-in sessions in browser/broker, and you specify a login_hint to match one of them, you will bypass the account picker.)",
         accept_nonempty_string=True,
         )
     login_hint = raw_login_hint["username"] if isinstance(raw_login_hint, dict) else raw_login_hint
@@ -127,9 +127,13 @@ def remove_account(app):
         app.remove_account(account)
         print('Account "{}" and/or its token(s) are signed out from MSAL Python'.format(account["username"]))
 
-def exit(_):
+def exit(app):
     """Exit"""
-    bug_link = "https://github.com/AzureAD/microsoft-authentication-library-for-python/issues/new/choose"
+    bug_link = (
+        "https://identitydivision.visualstudio.com/Engineering/_queries/query/79b3a352-a775-406f-87cd-a487c382a8ed/"
+        if app._enable_broker else
+        "https://github.com/AzureAD/microsoft-authentication-library-for-python/issues/new/choose"
+        )
     print("Bye. If you found a bug, please report it here: {}".format(bug_link))
     sys.exit()
 
