@@ -6,6 +6,7 @@ import sys
 import warnings
 from threading import Lock
 from typing import Optional  # Needed in Python 3.7 & 3.8
+from urllib.parse import urlparse
 import os
 
 from .oauth2cli import Client, JwtAssertionCreator
@@ -622,6 +623,9 @@ class ClientApplication(object):
         # Here the self.authority will not be the same type as authority in input
         if oidc_authority and authority:
             raise ValueError("You can not provide both authority and oidc_authority")
+        if isinstance(authority, str) and urlparse(authority).path.startswith(
+            "/dstsv2"):  # dSTS authority's path always starts with "/dstsv2"
+            oidc_authority = authority  # So we treat it as if an oidc_authority
         try:
             authority_to_use = authority or "https://{}/common/".format(WORLD_WIDE)
             self.authority = Authority(
