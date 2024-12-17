@@ -476,9 +476,10 @@ def get_lab_app(
     if os.getenv(env_client_id) and os.getenv(env_client_cert_path):
         # id came from https://docs.msidlab.com/accounts/confidentialclient.html
         client_id = os.getenv(env_client_id)
-        # Cert came from https://ms.portal.azure.com/#@microsoft.onmicrosoft.com/asset/Microsoft_Azure_KeyVault/Certificate/https://msidlabs.vault.azure.net/certificates/LabVaultAccessCert
         client_credential = {
-            "private_key_pfx_path": os.getenv(env_client_cert_path),
+            "private_key_pfx_path":
+                # Cert came from https://ms.portal.azure.com/#@microsoft.onmicrosoft.com/asset/Microsoft_Azure_KeyVault/Certificate/https://msidlabs.vault.azure.net/certificates/LabAuth
+                os.getenv(env_client_cert_path),
             "public_certificate": True,  # Opt in for SNI
             }
     elif os.getenv(env_client_id) and os.getenv(env_name2):
