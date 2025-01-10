@@ -1333,6 +1333,9 @@ class PopTestCase(LabBasedTestCase):
                 nonce=self._extract_pop_nonce(resp.headers.get("WWW-Authenticate")),
                 ),
             ))
+        # The api_endpoint is for test only and has no proper SSL certificate,
+        # so we suppress the CodeQL warning for disabling SSL certificate checks
+        # @suppress py/bandit/requests-ssl-verify-disabled
         resp = requests.get(api_endpoint, verify=False, headers={
             "Authorization": "pop {}".format(result["access_token"]),
             })
