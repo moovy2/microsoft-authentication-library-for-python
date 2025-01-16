@@ -1323,7 +1323,7 @@ class PopTestCase(LabBasedTestCase):
         # We skip it here because this test case has not yet initialize self.app
         # assert self.app.is_pop_supported()
         api_endpoint = "https://20.190.132.47/beta/me"
-        resp = requests.get(api_endpoint, verify=False)
+        resp = requests.get(api_endpoint, verify=False)  # @suppress py/bandit/requests-ssl-verify-disabled
         self.assertEqual(resp.status_code, 401, "Initial call should end with an http 401 error")
         result = self._get_shr_pop(**dict(
             self.get_lab_user(usertype="cloud"),  # This is generally not the current laptop's default AAD account
