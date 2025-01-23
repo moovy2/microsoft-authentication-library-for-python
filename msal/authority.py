@@ -5,8 +5,6 @@ except ImportError:  # Fall back to Python 2
     from urlparse import urlparse
 import logging
 
-from .exceptions import MsalServiceError
-
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +26,9 @@ WELL_KNOWN_B2C_HOSTS = [
     "b2clogin.cn",
     "b2clogin.us",
     "b2clogin.de",
+    "ciamlogin.com",
     ]
+_CIAM_DOMAIN_SUFFIX = ".ciamlogin.com"
 
 
 class AuthorityBuilder(object):
@@ -52,13 +52,12 @@ class Authority(object):
     """
     _domains_without_user_realm_discovery = set([])
 
-    @property
-    def http_client(self):  # Obsolete. We will remove this eventually
-        warnings.warn(
-            "authority.http_client might be removed in MSAL Python 1.21+", DeprecationWarning)
-        return self._http_client
-
-    def __init__(self, authority_url, http_client, validate_authority=True):
+    def __init__(
+            self, authority_url, http_client,
+            validate_authority=True,
+            instance_discovery=None,
+            oidc_authority_url=None,
+            ):
         """Creates an authority instance, and also validates it.
 
         :param validate_authority:
@@ -68,51 +67,96 @@ class Authority(object):
             performed.
         """
         self._http_client = http_client
+        if oidc_authority_url:
+            logger.debug("Initializing with OIDC authority: %s", oidc_authority_url)
+            tenant_discovery_endpoint = self._initialize_oidc_authority(
+                oidc_authority_url)
+        else:
+            logger.debug("Initializing with Entra authority: %s", authority_url)
+            tenant_discovery_endpoint = self._initialize_entra_authority(
+                authority_url, validate_authority, instance_discovery)
+        try:
+            openid_config = tenant_discovery(
+                tenant_discovery_endpoint,
+                self._http_client)
+        except ValueError:
+            error_message = (
+                "Unable to get OIDC authority configuration for {url} "
+                "because its OIDC Discovery endpoint is unavailable at "
+                "{url}/.well-known/openid-configuration ".format(url=oidc_authority_url)
+                if oidc_authority_url else
+                "Unable to get authority configuration for {}. "
+                "Authority would typically be in a format of "
+                "https://login.microsoftonline.com/your_tenant "
+                "or https://tenant_name.ciamlogin.com "
+                "or https://tenant_name.b2clogin.com/tenant.onmicrosoft.com/policy. "
+                .format(authority_url)
+                ) + " Also please double check your tenant name or GUID is correct."
+            raise ValueError(error_message)
+        logger.debug(
+            'openid_config("%s") = %s', tenant_discovery_endpoint, openid_config)
+        self.authorization_endpoint = openid_config['authorization_endpoint']
+        self.token_endpoint = openid_config['token_endpoint']
+        self.device_authorization_endpoint = openid_config.get('device_authorization_endpoint')
+        _, _, self.tenant = canonicalize(self.token_endpoint)  # Usually a GUID
+
+    def _initialize_oidc_authority(self, oidc_authority_url):
+        authority, self.instance, tenant = canonicalize(oidc_authority_url)
+        self.is_adfs = tenant.lower() == 'adfs'  # As a convention
+        self._is_b2c = True  # Not exactly true, but
+            # OIDC Authority was designed for CIAM which is the next gen of B2C.
+            # Besides, application.py uses this to bypass broker.
+        self._is_known_to_developer = True  # Not really relevant, but application.py uses this to bypass authority validation
+        return oidc_authority_url + "/.well-known/openid-configuration"
+
+    def _initialize_entra_authority(
+            self, authority_url, validate_authority, instance_discovery):
+        # :param instance_discovery:
+        #    By default, the known-to-Microsoft validation will use an
+        #    instance discovery endpoint located at ``login.microsoftonline.com``.
+        #    You can customize the endpoint by providing a url as a string.
+        #    Or you can turn this behavior off by passing in a False here.
         if isinstance(authority_url, AuthorityBuilder):
             authority_url = str(authority_url)
         authority, self.instance, tenant = canonicalize(authority_url)
+        is_ciam = self.instance.endswith(_CIAM_DOMAIN_SUFFIX)
+        self.is_adfs = tenant.lower() == 'adfs' and not is_ciam
         parts = authority.path.split('/')
-        is_b2c = any(self.instance.endswith("." + d) for d in WELL_KNOWN_B2C_HOSTS) or (
-            len(parts) == 3 and parts[2].lower().startswith("b2c_"))
-        if (tenant != "adfs" and (not is_b2c) and validate_authority
-                and self.instance not in WELL_KNOWN_AUTHORITY_HOSTS):
-            payload = instance_discovery(
+        self._is_b2c = any(
+            self.instance.endswith("." + d) for d in WELL_KNOWN_B2C_HOSTS
+            ) or (len(parts) == 3 and parts[2].lower().startswith("b2c_"))
+        self._is_known_to_developer = self.is_adfs or self._is_b2c or not validate_authority
+        is_known_to_microsoft = self.instance in WELL_KNOWN_AUTHORITY_HOSTS
+        instance_discovery_endpoint = 'https://{}/common/discovery/instance'.format(  # Note: This URL seemingly returns V1 endpoint only
+            WORLD_WIDE  # Historically using WORLD_WIDE. Could use self.instance too
+                # See https://github.com/AzureAD/microsoft-authentication-library-for-dotnet/blob/4.0.0/src/Microsoft.Identity.Client/Instance/AadInstanceDiscovery.cs#L101-L103
+                # and https://github.com/AzureAD/microsoft-authentication-library-for-dotnet/blob/4.0.0/src/Microsoft.Identity.Client/Instance/AadAuthority.cs#L19-L33
+            ) if instance_discovery in (None, True) else instance_discovery
+        if instance_discovery_endpoint and not (
+                is_known_to_microsoft or self._is_known_to_developer):
+            payload = _instance_discovery(
                 "https://{}{}/oauth2/v2.0/authorize".format(
                     self.instance, authority.path),
-                self._http_client)
+                self._http_client,
+                instance_discovery_endpoint)
             if payload.get("error") == "invalid_instance":
                 raise ValueError(
                     "invalid_instance: "
                     "The authority you provided, %s, is not whitelisted. "
                     "If it is indeed your legit customized domain name, "
                     "you can turn off this check by passing in "
-                    "validate_authority=False"
+                    "instance_discovery=False"
                     % authority_url)
             tenant_discovery_endpoint = payload['tenant_discovery_endpoint']
         else:
-            tenant_discovery_endpoint = (
-                'https://{}{}{}/.well-known/openid-configuration'.format(
-                    self.instance,
-                    authority.path,  # In B2C scenario, it is "/tenant/policy"
-                    "" if tenant == "adfs" else "/v2.0" # the AAD v2 endpoint
-                    ))
-        try:
-            openid_config = tenant_discovery(
-                tenant_discovery_endpoint,
-                self._http_client)
-        except ValueError:
-            raise ValueError(
-                "Unable to get authority configuration for {}. "
-                "Authority would typically be in a format of "
-                "https://login.microsoftonline.com/your_tenant "
-                "Also please double check your tenant name or GUID is correct.".format(
-                authority_url))
-        logger.debug("openid_config = %s", openid_config)
-        self.authorization_endpoint = openid_config['authorization_endpoint']
-        self.token_endpoint = openid_config['token_endpoint']
-        self.device_authorization_endpoint = openid_config.get('device_authorization_endpoint')
-        _, _, self.tenant = canonicalize(self.token_endpoint)  # Usually a GUID
-        self.is_adfs = self.tenant.lower() == 'adfs'
+            tenant_discovery_endpoint = authority._replace(
+                path="{prefix}{version}/.well-known/openid-configuration".format(
+                    prefix=tenant if is_ciam and len(authority.path) <= 1  # Path-less CIAM
+                        else authority.path,  # In B2C, it is "/tenant/policy"
+                    version="" if self.is_adfs else "/v2.0",
+                    )
+                ).geturl()  # Keeping original port and query. Query is useful for test.
+        return tenant_discovery_endpoint
 
     def user_realm_discovery(self, username, correlation_id=None, response=None):
         # It will typically return a dict containing "ver", "account_type",
@@ -131,26 +175,32 @@ class Authority(object):
         return {}  # This can guide the caller to fall back normal ROPC flow
 
 
-def canonicalize(authority_url):
+def canonicalize(authority_or_auth_endpoint):
     # Returns (url_parsed_result, hostname_in_lowercase, tenant)
-    authority = urlparse(authority_url)
-    parts = authority.path.split("/")
-    if authority.scheme != "https" or len(parts) < 2 or not parts[1]:
-        raise ValueError(
-            "Your given address (%s) should consist of "
-            "an https url with a minimum of one segment in a path: e.g. "
-            "https://login.microsoftonline.com/<tenant> "
-            "or https://<tenant_name>.b2clogin.com/<tenant_name>.onmicrosoft.com/policy"
-            % authority_url)
-    return authority, authority.hostname, parts[1]
+    authority = urlparse(authority_or_auth_endpoint)
+    if authority.scheme == "https":
+        parts = authority.path.split("/")
+        first_part = parts[1] if len(parts) >= 2 and parts[1] else None
+        if authority.hostname.endswith(_CIAM_DOMAIN_SUFFIX):  # CIAM
+            # Use path in CIAM authority. It will be validated by OIDC Discovery soon
+            tenant = first_part if first_part else "{}.onmicrosoft.com".format(
+                # Fallback to sub domain name. This variation may not be advertised
+                authority.hostname.rsplit(_CIAM_DOMAIN_SUFFIX, 1)[0])
+            return authority, authority.hostname, tenant
+        # AAD
+        if len(parts) >= 2 and parts[1]:
+            return authority, authority.hostname, parts[1]
+    raise ValueError(
+        "Your given address (%s) should consist of "
+        "an https url with a minimum of one segment in a path: e.g. "
+        "https://login.microsoftonline.com/{tenant} "
+        "or https://{tenant_name}.ciamlogin.com/{tenant} "
+        "or https://{tenant_name}.b2clogin.com/{tenant_name}.onmicrosoft.com/policy"
+        % authority_or_auth_endpoint)
 
-def instance_discovery(url, http_client, **kwargs):
-    resp = http_client.get(  # Note: This URL seemingly returns V1 endpoint only
-        'https://{}/common/discovery/instance'.format(
-            WORLD_WIDE  # Historically using WORLD_WIDE. Could use self.instance too
-                # See https://github.com/AzureAD/microsoft-authentication-library-for-dotnet/blob/4.0.0/src/Microsoft.Identity.Client/Instance/AadInstanceDiscovery.cs#L101-L103
-                # and https://github.com/AzureAD/microsoft-authentication-library-for-dotnet/blob/4.0.0/src/Microsoft.Identity.Client/Instance/AadAuthority.cs#L19-L33
-            ),
+def _instance_discovery(url, http_client, instance_discovery_endpoint, **kwargs):
+    resp = http_client.get(
+        instance_discovery_endpoint,
         params={'authorization_endpoint': url, 'api-version': '1.0'},
         **kwargs)
     return json.loads(resp.text)
@@ -159,16 +209,14 @@ def tenant_discovery(tenant_discovery_endpoint, http_client, **kwargs):
     # Returns Openid Configuration
     resp = http_client.get(tenant_discovery_endpoint, **kwargs)
     if resp.status_code == 200:
-        payload = json.loads(resp.text)  # It could raise ValueError
-        if 'authorization_endpoint' in payload and 'token_endpoint' in payload:
-            return payload  # Happy path
-        raise ValueError("OIDC Discovery does not provide enough information")
+        return json.loads(resp.text)  # It could raise ValueError
     if 400 <= resp.status_code < 500:
         # Nonexist tenant would hit this path
         # e.g. https://login.microsoftonline.com/nonexist_tenant/v2.0/.well-known/openid-configuration
-        raise ValueError(
-            "OIDC Discovery endpoint rejects our request. Error: {}".format(
-                resp.text  # Expose it as-is b/c OIDC defines no error response format
+        raise ValueError("OIDC Discovery failed on {}. HTTP status: {}, Error: {}".format(
+            tenant_discovery_endpoint,
+            resp.status_code,
+            resp.text,  # Expose it as-is b/c OIDC defines no error response format
             ))
     # Transient network error would hit this path
     resp.raise_for_status()

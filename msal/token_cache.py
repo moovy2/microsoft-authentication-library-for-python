@@ -2,16 +2,23 @@
 import threading
 import time
 import logging
+import warnings
 
 from .authority import canonicalize
 from .oauth2cli.oidc import decode_part, decode_id_token
+from .oauth2cli.oauth2 import Client
 
 
 logger = logging.getLogger(__name__)
+_GRANT_TYPE_BROKER = "broker"
 
 def is_subdict_of(small, big):
     return dict(big, **small) == big
 
+def _get_username(id_token_claims):
+    return id_token_claims.get(
+        "preferred_username",  # AAD
+        id_token_claims.get("upn"))  # ADFS 2019
 
 class TokenCache(object):
     """This is considered as a base class containing minimal cache behavior.
@@ -36,6 +43,8 @@ class TokenCache(object):
         self._lock = threading.RLock()
         self._cache = {}
         self.key_makers = {
+            # Note: We have changed token key format before when ordering scopes;
+            #       changing token key won't result in cache miss.
             self.CredentialType.REFRESH_TOKEN:
                 lambda home_account_id=None, environment=None, client_id=None,
                         target=None, **ignored_payload_from_a_real_token:
@@ -49,14 +58,18 @@ class TokenCache(object):
                         ]).lower(),
             self.CredentialType.ACCESS_TOKEN:
                 lambda home_account_id=None, environment=None, client_id=None,
-                        realm=None, target=None, **ignored_payload_from_a_real_token:
-                    "-".join([
+                        realm=None, target=None,
+                        # Note: New field(s) can be added here
+                        #key_id=None,
+                        **ignored_payload_from_a_real_token:
+                    "-".join([  # Note: Could use a hash here to shorten key length
                         home_account_id or "",
                         environment or "",
                         self.CredentialType.ACCESS_TOKEN,
                         client_id or "",
                         realm or "",
                         target or "",
+                        #key_id or "",  # So ATs of different key_id can coexist
                         ]).lower(),
             self.CredentialType.ID_TOKEN:
                 lambda home_account_id=None, environment=None, client_id=None,
@@ -82,45 +95,120 @@ class TokenCache(object):
                     "appmetadata-{}-{}".format(environment or "", client_id or ""),
             }
 
-    def find(self, credential_type, target=None, query=None):
-        target = target or []
+    def _get_access_token(
+        self,
+        home_account_id, environment, client_id, realm, target,  # Together they form a compound key
+        default=None,
+    ):  # O(1)
+        return self._get(
+            self.CredentialType.ACCESS_TOKEN,
+            self.key_makers[TokenCache.CredentialType.ACCESS_TOKEN](
+                home_account_id=home_account_id,
+                environment=environment,
+                client_id=client_id,
+                realm=realm,
+                target=" ".join(target),
+                ),
+            default=default)
+
+    def _get_app_metadata(self, environment, client_id, default=None):  # O(1)
+        return self._get(
+            self.CredentialType.APP_METADATA,
+            self.key_makers[TokenCache.CredentialType.APP_METADATA](
+                environment=environment,
+                client_id=client_id,
+                ),
+            default=default)
+
+    def _get(self, credential_type, key, default=None):  # O(1)
+        with self._lock:
+            return self._cache.get(credential_type, {}).get(key, default)
+
+    @staticmethod
+    def _is_matching(entry: dict, query: dict, target_set: set = None) -> bool:
+        return is_subdict_of(query or {}, entry) and (
+            target_set <= set(entry.get("target", "").split())
+            if target_set else True)
+
+    def search(self, credential_type, target=None, query=None, *, now=None):  # O(n) generator
+        """Returns a generator of matching entries.
+
+        It is O(1) for AT hits, and O(n) for other types.
+        Note that it holds a lock during the entire search.
+        """
+        target = sorted(target or [])  # Match the order sorted by add()
         assert isinstance(target, list), "Invalid parameter type"
+
+        preferred_result = None
+        if (credential_type == self.CredentialType.ACCESS_TOKEN
+            and isinstance(query, dict)
+            and "home_account_id" in query and "environment" in query
+            and "client_id" in query and "realm" in query and target
+        ):  # Special case for O(1) AT lookup
+            preferred_result = self._get_access_token(
+                query["home_account_id"], query["environment"],
+                query["client_id"], query["realm"], target)
+            if preferred_result and self._is_matching(
+                preferred_result, query,
+                # Needs no target_set here because it is satisfied by dict key
+            ):
+                yield preferred_result
+
         target_set = set(target)
         with self._lock:
-            # Since the target inside token cache key is (per schema) unsorted,
-            # there is no point to attempt an O(1) key-value search here.
-            # So we always do an O(n) in-memory search.
-            return [entry
-                for entry in self._cache.get(credential_type, {}).values()
-                if is_subdict_of(query or {}, entry)
-                and (target_set <= set(entry.get("target", "").split())
-		    if target else True)
-                ]
+            # O(n) search. The key is NOT used in search.
+            now = int(time.time() if now is None else now)
+            expired_access_tokens = [
+                # Especially when/if we key ATs by ephemeral fields such as key_id,
+                # stale ATs keyed by an old key_id would stay forever.
+                # Here we collect them for their removal.
+            ]
+            for entry in self._cache.get(credential_type, {}).values():
+                if (  # Automatically delete expired access tokens
+                    credential_type == self.CredentialType.ACCESS_TOKEN
+                    and int(entry["expires_on"]) < now
+                ):
+                    expired_access_tokens.append(entry)  # Can't delete them within current for-loop
+                    continue
+                if (entry != preferred_result  # Avoid yielding the same entry twice
+                    and self._is_matching(entry, query, target_set=target_set)
+                ):
+                    yield entry
+            for at in expired_access_tokens:
+                self.remove_at(at)
+
+    def find(self, credential_type, target=None, query=None, *, now=None):
+        """Equivalent to list(search(...))."""
+        warnings.warn(
+            "Use list(search(...)) instead to explicitly get a list.",
+            DeprecationWarning)
+        return list(self.search(credential_type, target=target, query=query, now=now))
 
     def add(self, event, now=None):
-        # type: (dict) -> None
-        """Handle a token obtaining event, and add tokens into cache.
-
-        Known side effects: This function modifies the input event in place.
-        """
-        def wipe(dictionary, sensitive_fields):  # Masks sensitive info
-            for sensitive in sensitive_fields:
-                if sensitive in dictionary:
-                    dictionary[sensitive] = "********"
-        wipe(event.get("data", {}),
-            ("password", "client_secret", "refresh_token", "assertion"))
-        try:
-            return self.__add(event, now=now)
-        finally:
-            wipe(event.get("response", {}), (  # These claims were useful during __add()
-                "access_token", "refresh_token", "id_token", "username"))
-            wipe(event, ["username"])  # Needed for federated ROPC
-            logger.debug("event=%s", json.dumps(
-            # We examined and concluded that this log won't have Log Injection risk,
-            # because the event payload is already in JSON so CR/LF will be escaped.
-                event, indent=4, sort_keys=True,
-                default=str,  # A workaround when assertion is in bytes in Python 3
-                ))
+        """Handle a token obtaining event, and add tokens into cache."""
+        def make_clean_copy(dictionary, sensitive_fields):  # Masks sensitive info
+            return {
+                k: "********" if k in sensitive_fields else v
+                for k, v in dictionary.items()
+            }
+        clean_event = dict(
+            event,
+            data=make_clean_copy(event.get("data", {}), (
+                "password", "client_secret", "refresh_token", "assertion",
+            )),
+            response=make_clean_copy(event.get("response", {}), (
+                "id_token_claims",  # Provided by broker
+                "access_token", "refresh_token", "id_token", "username",
+            )),
+        )
+        logger.debug("event=%s", json.dumps(
+        # We examined and concluded that this log won't have Log Injection risk,
+        # because the event payload is already in JSON so CR/LF will be escaped.
+            clean_event,
+            indent=4, sort_keys=True,
+            default=str,  # assertion is in bytes in Python 3
+        ))
+        return self.__add(event, now=now)
 
     def __parse_account(self, response, id_token_claims):
         """Return client_info and home_account_id"""
@@ -148,19 +236,22 @@ class TokenCache(object):
         access_token = response.get("access_token")
         refresh_token = response.get("refresh_token")
         id_token = response.get("id_token")
-        id_token_claims = (
-            decode_id_token(id_token, client_id=event["client_id"])
-            if id_token else {})
+        id_token_claims = response.get("id_token_claims") or (  # Prefer the claims from broker
+            # Only use decode_id_token() when necessary, it contains time-sensitive validation
+            decode_id_token(id_token, client_id=event["client_id"]) if id_token else {})
         client_info, home_account_id = self.__parse_account(response, id_token_claims)
 
-        target = ' '.join(event.get("scope") or [])  # Per schema, we don't sort it
+        target = ' '.join(sorted(event.get("scope") or []))  # Schema should have required sorting
 
         with self._lock:
             now = int(time.time() if now is None else now)
 
             if access_token:
+                default_expires_in = (  # https://www.rfc-editor.org/rfc/rfc6749#section-5.1
+                    int(response.get("expires_on")) - now  # Some Managed Identity emits this
+                    ) if response.get("expires_on") else 600
                 expires_in = int(  # AADv1-like endpoint returns a string
-			response.get("expires_in", 3599))
+                    response.get("expires_in", default_expires_in))
                 ext_expires_in = int(  # AADv1-like endpoint returns a string
 			response.get("ext_expires_in", expires_in))
                 at = {
@@ -176,8 +267,11 @@ class TokenCache(object):
                     "expires_on": str(now + expires_in),  # Same here
                     "extended_expires_on": str(now + ext_expires_in)  # Same here
                     }
-                if data.get("key_id"):  # It happens in SSH-cert or POP scenario
-                    at["key_id"] = data.get("key_id")
+                at.update({k: data[k] for k in data if k in {
+                    # Also store extra data which we explicitly allow
+                    # So that we won't accidentally store a user's password etc.
+                    "key_id",  # It happens in SSH-cert or POP scenario
+                }})
                 if "refresh_in" in response:
                     refresh_in = response["refresh_in"]  # It is an integer
                     at["refresh_on"] = str(now + refresh_in)  # Schema wants a string
@@ -188,18 +282,25 @@ class TokenCache(object):
                     "home_account_id": home_account_id,
                     "environment": environment,
                     "realm": realm,
-                    "local_account_id": id_token_claims.get(
-                        "oid", id_token_claims.get("sub")),
-                    "username": id_token_claims.get("preferred_username")  # AAD
-                        or id_token_claims.get("upn")  # ADFS 2019
+                    "local_account_id": event.get(
+                        "_account_id",  # Came from mid-tier code path.
+                            # Emperically, it is the oid in AAD or cid in MSA.
+                        id_token_claims.get("oid", id_token_claims.get("sub"))),
+                    "username": _get_username(id_token_claims)
                         or data.get("username")  # Falls back to ROPC username
                         or event.get("username")  # Falls back to Federated ROPC username
                         or "",  # The schema does not like null
-                    "authority_type":
+                    "authority_type": event.get(
+                        "authority_type",  # Honor caller's choice of authority_type
                         self.AuthorityType.ADFS if realm == "adfs"
-                        else self.AuthorityType.MSSTS,
+                            else self.AuthorityType.MSSTS),
                     # "client_info": response.get("client_info"),  # Optional
                     }
+                grant_types_that_establish_an_account = (
+                    _GRANT_TYPE_BROKER, "authorization_code", "password",
+                    Client.DEVICE_FLOW["GRANT_TYPE"])
+                if event.get("grant_type") in grant_types_that_establish_an_account:
+                    account["account_source"] = event["grant_type"]
                 self.modify(self.CredentialType.ACCOUNT, account, account)
 
             if id_token:
@@ -283,19 +384,29 @@ class SerializableTokenCache(TokenCache):
 
     This class does NOT actually persist the cache on disk/db/etc..
     Depending on your need,
-    the following simple recipe for file-based persistence may be sufficient::
+    the following simple recipe for file-based, unencrypted persistence may be sufficient::
 
         import os, atexit, msal
+        cache_filename = os.path.join(  # Persist cache into this file
+            os.getenv(
+                # Automatically wipe out the cache from Linux when user's ssh session ends.
+                # See also https://github.com/AzureAD/microsoft-authentication-library-for-python/issues/690
+                "XDG_RUNTIME_DIR", ""),
+            "my_cache.bin")
         cache = msal.SerializableTokenCache()
-        if os.path.exists("my_cache.bin"):
-            cache.deserialize(open("my_cache.bin", "r").read())
+        if os.path.exists(cache_filename):
+            cache.deserialize(open(cache_filename, "r").read())
         atexit.register(lambda:
-            open("my_cache.bin", "w").write(cache.serialize())
+            open(cache_filename, "w").write(cache.serialize())
             # Hint: The following optional line persists only when state changed
             if cache.has_state_changed else None
             )
         app = msal.ClientApplication(..., token_cache=cache)
         ...
+
+    Alternatively, you may use a more sophisticated cache persistence library,
+    `MSAL Extensions <https://github.com/AzureAD/microsoft-authentication-extensions-for-python>`_,
+    which provides token cache persistence with encryption, and more.
 
     :var bool has_state_changed:
         Indicates whether the cache state in the memory has changed since last
