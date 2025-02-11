@@ -1,10 +1,16 @@
 # Note: Since Aug 2019 we move all e2e tests into test_e2e.py,
 # so this test_application file contains only unit tests without dependency.
+import json
+import logging
 import sys
-from msal.application import *
-from msal.application import _str2bytes
+import time
+from unittest.mock import patch, Mock
 import msal
-from msal.application import _merge_claims_challenge_and_capabilities
+from msal.application import (
+    extract_certs,
+    ClientApplication, PublicClientApplication, ConfidentialClientApplication,
+    _str2bytes, _merge_claims_challenge_and_capabilities,
+)
 from tests import unittest
 from tests.test_token_cache import build_id_token, build_response
 from tests.http_client import MinimalHttpClient, MinimalResponse
@@ -108,6 +114,7 @@ class TestClientApplicationAcquireTokenSilentErrorBehaviors(unittest.TestCase):
         result = self.app.acquire_token_silent_with_error(
             self.scopes, self.account, post=tester)
         self.assertEqual("", result.get("classification"))
+
 
 class TestClientApplicationAcquireTokenSilentFociBehaviors(unittest.TestCase):
 
@@ -263,6 +270,7 @@ class TestClientApplicationForAuthorityMigration(unittest.TestCase):
     def test_acquire_token_silent_should_find_at_under_different_alias(self):
         result = self.app.acquire_token_silent(self.scopes, self.account)
         self.assertNotEqual(None, result)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_CACHE)
         self.assertEqual(self.access_token, result.get('access_token'))
 
     def test_acquire_token_silent_should_find_rt_under_different_alias(self):
@@ -332,6 +340,7 @@ class TestApplicationForRefreshInBehaviors(unittest.TestCase):
     account = {"home_account_id": "{}.{}".format(uid, utid)}
     rt = "this is a rt"
     client_id = "my_app"
+    soon = 60  # application.py considers tokens within 5 minutes as expired
 
     @classmethod
     def setUpClass(cls):  # Initialization at runtime, not interpret-time
@@ -351,45 +360,63 @@ class TestApplicationForRefreshInBehaviors(unittest.TestCase):
                 uid=self.uid, utid=self.utid, refresh_token=self.rt),
             })
 
+    def assertRefreshOn(self, result, refresh_in):
+        refresh_on = int(time.time() + refresh_in)
+        self.assertTrue(
+            refresh_on - 1 < result.get("refresh_on", 0) < refresh_on + 1,
+            "refresh_on should be set properly")
+
     def test_fresh_token_should_be_returned_from_cache(self):
         # a.k.a. Return unexpired token that is not above token refresh expiration threshold
+        refresh_in = 450
         access_token = "An access token prepopulated into cache"
-        self.populate_cache(access_token=access_token, expires_in=900, refresh_in=450)
+        self.populate_cache(
+            access_token=access_token, expires_in=900, refresh_in=refresh_in)
         result = self.app.acquire_token_silent(
             ['s1'], self.account,
             post=lambda url, *args, **kwargs:  # Utilize the undocumented test feature
                 self.fail("I/O shouldn't happen in cache hit AT scenario")
             )
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_CACHE)
         self.assertEqual(access_token, result.get("access_token"))
         self.assertNotIn("refresh_in", result, "Customers need not know refresh_in")
+        self.assertRefreshOn(result, refresh_in)
 
     def test_aging_token_and_available_aad_should_return_new_token(self):
         # a.k.a. Attempt to refresh unexpired token when AAD available
         self.populate_cache(access_token="old AT", expires_in=3599, refresh_in=-1)
         new_access_token = "new AT"
+        new_refresh_in = 123
         def mock_post(url, headers=None, *args, **kwargs):
             self.assertEqual("4|84,4|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
             return MinimalResponse(status_code=200, text=json.dumps({
                 "access_token": new_access_token,
-                "refresh_in": 123,
+                "refresh_in": new_refresh_in,
                 }))
         result = self.app.acquire_token_silent(['s1'], self.account, post=mock_post)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_IDP)
         self.assertEqual(new_access_token, result.get("access_token"))
         self.assertNotIn("refresh_in", result, "Customers need not know refresh_in")
+        self.assertRefreshOn(result, new_refresh_in)
 
     def test_aging_token_and_unavailable_aad_should_return_old_token(self):
         # a.k.a. Attempt refresh unexpired token when AAD unavailable
+        refresh_in = -1
         old_at = "old AT"
-        self.populate_cache(access_token=old_at, expires_in=3599, refresh_in=-1)
+        self.populate_cache(
+            access_token=old_at, expires_in=3599, refresh_in=refresh_in)
         def mock_post(url, headers=None, *args, **kwargs):
-            self.assertEqual("4|84,2|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
-            return MinimalResponse(status_code=400, text=json.dumps({"error": error}))
+            self.assertEqual("4|84,4|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
+            return MinimalResponse(status_code=400, text=json.dumps({"error": "foo"}))
         result = self.app.acquire_token_silent(['s1'], self.account, post=mock_post)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_CACHE)
         self.assertEqual(old_at, result.get("access_token"))
+        self.assertRefreshOn(result, refresh_in)
 
     def test_expired_token_and_unavailable_aad_should_return_error(self):
         # a.k.a. Attempt refresh expired token when AAD unavailable
-        self.populate_cache(access_token="expired at", expires_in=-1, refresh_in=-900)
+        self.populate_cache(
+            access_token="expired at", expires_in=self.soon, refresh_in=-900)
         error = "something went wrong"
         def mock_post(url, headers=None, *args, **kwargs):
             self.assertEqual("4|84,3|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
@@ -400,17 +427,21 @@ class TestApplicationForRefreshInBehaviors(unittest.TestCase):
 
     def test_expired_token_and_available_aad_should_return_new_token(self):
         # a.k.a. Attempt refresh expired token when AAD available
-        self.populate_cache(access_token="expired at", expires_in=-1, refresh_in=-900)
+        self.populate_cache(
+            access_token="expired at", expires_in=self.soon, refresh_in=-900)
         new_access_token = "new AT"
+        new_refresh_in = 123
         def mock_post(url, headers=None, *args, **kwargs):
             self.assertEqual("4|84,3|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
             return MinimalResponse(status_code=200, text=json.dumps({
                 "access_token": new_access_token,
-                "refresh_in": 123,
+                "refresh_in": new_refresh_in,
                 }))
         result = self.app.acquire_token_silent(['s1'], self.account, post=mock_post)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_IDP)
         self.assertEqual(new_access_token, result.get("access_token"))
         self.assertNotIn("refresh_in", result, "Customers need not know refresh_in")
+        self.assertRefreshOn(result, new_refresh_in)
 
 
 class TestTelemetryMaintainingOfflineState(unittest.TestCase):
@@ -444,6 +475,7 @@ class TestTelemetryMaintainingOfflineState(unittest.TestCase):
             post=lambda url, *args, **kwargs:  # Utilize the undocumented test feature
                 self.fail("I/O shouldn't happen in cache hit AT scenario")
             )
+        self.assertEqual(result[app._TOKEN_SOURCE], app._TOKEN_SOURCE_CACHE)
         self.assertEqual(cached_access_token, result.get("access_token"))
 
         error1 = "error_1"
@@ -477,6 +509,7 @@ class TestTelemetryMaintainingOfflineState(unittest.TestCase):
                 "The previous error should result in same success counter plus latest error info")
             return MinimalResponse(status_code=200, text=json.dumps({"access_token": at}))
         result = app.acquire_token_by_device_flow({"device_code": "123"}, post=mock_post)
+        self.assertEqual(result[app._TOKEN_SOURCE], app._TOKEN_SOURCE_IDP)
         self.assertEqual(at, result.get("access_token"))
 
         def mock_post(url, headers=None, *args, **kwargs):
@@ -485,6 +518,7 @@ class TestTelemetryMaintainingOfflineState(unittest.TestCase):
                 "The previous success should reset all offline telemetry counters")
             return MinimalResponse(status_code=200, text=json.dumps({"access_token": at}))
         result = app.acquire_token_by_device_flow({"device_code": "123"}, post=mock_post)
+        self.assertEqual(result[app._TOKEN_SOURCE], app._TOKEN_SOURCE_IDP)
         self.assertEqual(at, result.get("access_token"))
 
 
@@ -503,6 +537,7 @@ class TestTelemetryOnClientApplication(unittest.TestCase):
         result = self.app.acquire_token_by_auth_code_flow(
             {"state": state, "code_verifier": "bar"}, {"state": state, "code": "012"},
             post=mock_post)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_IDP)
         self.assertEqual(at, result.get("access_token"))
 
     def test_acquire_token_by_refresh_token(self):
@@ -511,6 +546,7 @@ class TestTelemetryOnClientApplication(unittest.TestCase):
             self.assertEqual("4|85,1|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
             return MinimalResponse(status_code=200, text=json.dumps({"access_token": at}))
         result = self.app.acquire_token_by_refresh_token("rt", ["s"], post=mock_post)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_IDP)
         self.assertEqual(at, result.get("access_token"))
 
 
@@ -529,6 +565,7 @@ class TestTelemetryOnPublicClientApplication(unittest.TestCase):
             return MinimalResponse(status_code=200, text=json.dumps({"access_token": at}))
         result = self.app.acquire_token_by_device_flow(
             {"device_code": "123"}, post=mock_post)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_IDP)
         self.assertEqual(at, result.get("access_token"))
 
     def test_acquire_token_by_username_password(self):
@@ -538,6 +575,7 @@ class TestTelemetryOnPublicClientApplication(unittest.TestCase):
             return MinimalResponse(status_code=200, text=json.dumps({"access_token": at}))
         result = self.app.acquire_token_by_username_password(
             "username", "password", ["scope"], post=mock_post)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_IDP)
         self.assertEqual(at, result.get("access_token"))
 
 
@@ -549,12 +587,34 @@ class TestTelemetryOnConfidentialClientApplication(unittest.TestCase):
             authority="https://login.microsoftonline.com/common")
 
     def test_acquire_token_for_client(self):
-        at = "this is an access token"
         def mock_post(url, headers=None, *args, **kwargs):
-            self.assertEqual("4|730,0|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
-            return MinimalResponse(status_code=200, text=json.dumps({"access_token": at}))
+            self.assertEqual("4|730,2|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
+            return MinimalResponse(status_code=200, text=json.dumps({
+                "access_token": "AT 1",
+                "expires_in": 0,
+                }))
         result = self.app.acquire_token_for_client(["scope"], post=mock_post)
-        self.assertEqual(at, result.get("access_token"))
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_IDP)
+        self.assertEqual("AT 1", result.get("access_token"), "Shall get a new token")
+
+        def mock_post(url, headers=None, *args, **kwargs):
+            self.assertEqual("4|730,3|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
+            return MinimalResponse(status_code=200, text=json.dumps({
+                "access_token": "AT 2",
+                "expires_in": 3600,
+                "refresh_in": -100,  # A hack to make sure it will attempt refresh
+                }))
+        result = self.app.acquire_token_for_client(["scope"], post=mock_post)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_IDP)
+        self.assertEqual("AT 2", result.get("access_token"), "Shall get a new token")
+
+        def mock_post(url, headers=None, *args, **kwargs):
+            # 1/0  # TODO: Make sure this was called
+            self.assertEqual("4|730,4|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
+            return MinimalResponse(status_code=400, text=json.dumps({"error": "foo"}))
+        result = self.app.acquire_token_for_client(["scope"], post=mock_post)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_CACHE)
+        self.assertEqual("AT 2", result.get("access_token"), "Shall get aging token")
 
     def test_acquire_token_on_behalf_of(self):
         at = "this is an access token"
@@ -562,6 +622,7 @@ class TestTelemetryOnConfidentialClientApplication(unittest.TestCase):
             self.assertEqual("4|523,0|", (headers or {}).get(CLIENT_CURRENT_TELEMETRY))
             return MinimalResponse(status_code=200, text=json.dumps({"access_token": at}))
         result = self.app.acquire_token_on_behalf_of("assertion", ["s"], post=mock_post)
+        self.assertEqual(result[self.app._TOKEN_SOURCE], self.app._TOKEN_SOURCE_IDP)
         self.assertEqual(at, result.get("access_token"))
 
 
@@ -608,7 +669,7 @@ class TestClientApplicationWillGroupAccounts(unittest.TestCase):
     sys.version_info[0] >= 3 and sys.version_info[1] >= 2,
     "assertWarns() is only available in Python 3.2+")
 class TestClientCredentialGrant(unittest.TestCase):
-    def _test_certain_authority_should_emit_warnning(self, authority):
+    def _test_certain_authority_should_emit_warning(self, authority):
         app = ConfidentialClientApplication(
             "client_id", client_credential="secret", authority=authority)
         def mock_post(url, headers=None, *args, **kwargs):
@@ -617,11 +678,181 @@ class TestClientCredentialGrant(unittest.TestCase):
         with self.assertWarns(DeprecationWarning):
             app.acquire_token_for_client(["scope"], post=mock_post)
 
-    def test_common_authority_should_emit_warnning(self):
-        self._test_certain_authority_should_emit_warnning(
+    def test_common_authority_should_emit_warning(self):
+        self._test_certain_authority_should_emit_warning(
             authority="https://login.microsoftonline.com/common")
 
-    def test_organizations_authority_should_emit_warnning(self):
-        self._test_certain_authority_should_emit_warnning(
+    def test_organizations_authority_should_emit_warning(self):
+        self._test_certain_authority_should_emit_warning(
             authority="https://login.microsoftonline.com/organizations")
+
+
+class TestRemoveTokensForClient(unittest.TestCase):
+    def test_remove_tokens_for_client_should_remove_client_tokens_only(self):
+        at_for_user = "AT for user"
+        cca = msal.ConfidentialClientApplication(
+            "client_id", client_credential="secret",
+            authority="https://login.microsoftonline.com/microsoft.onmicrosoft.com")
+        self.assertEqual(
+            0, len(cca.token_cache.find(msal.TokenCache.CredentialType.ACCESS_TOKEN)))
+        cca.acquire_token_for_client(
+            ["scope"],
+            post=lambda url, **kwargs: MinimalResponse(
+                status_code=200, text=json.dumps({"access_token": "AT for client"})))
+        self.assertEqual(
+            1, len(cca.token_cache.find(msal.TokenCache.CredentialType.ACCESS_TOKEN)))
+        cca.acquire_token_by_username_password(
+            "johndoe", "password", ["scope"],
+            post=lambda url, **kwargs: MinimalResponse(
+                status_code=200, text=json.dumps(build_response(
+                    access_token=at_for_user, expires_in=3600,
+                    uid="uid", utid="utid",  # This populates home_account_id
+                    ))))
+        self.assertEqual(
+            2, len(cca.token_cache.find(msal.TokenCache.CredentialType.ACCESS_TOKEN)))
+        cca.remove_tokens_for_client()
+        remaining_tokens = cca.token_cache.find(msal.TokenCache.CredentialType.ACCESS_TOKEN)
+        self.assertEqual(1, len(remaining_tokens))
+        self.assertEqual(at_for_user, remaining_tokens[0].get("secret"))
+
+
+class TestScopeDecoration(unittest.TestCase):
+    def _test_client_id_should_be_a_valid_scope(self, client_id, other_scopes):
+        # B2C needs this https://learn.microsoft.com/en-us/azure/active-directory-b2c/access-tokens#openid-connect-scopes
+        reserved_scope = ['openid', 'profile', 'offline_access']
+        scopes_to_use = [client_id] + other_scopes
+        self.assertEqual(
+            set(ClientApplication(client_id)._decorate_scope(scopes_to_use)),
+            set(scopes_to_use + reserved_scope),
+            "Scope decoration should return input scopes plus reserved scopes")
+
+    def test_client_id_should_be_a_valid_scope(self):
+        self._test_client_id_should_be_a_valid_scope("client_id", [])
+        self._test_client_id_should_be_a_valid_scope("client_id", ["foo"])
+
+
+@patch("sys.platform", new="darwin")  # Pretend running on Mac.
+@patch("msal.authority.tenant_discovery", new=Mock(return_value={
+    "authorization_endpoint": "https://contoso.com/placeholder",
+    "token_endpoint": "https://contoso.com/placeholder",
+    }))
+class TestMsalBehaviorWithoutPyMsalRuntimeOrBroker(unittest.TestCase):
+
+    @patch("msal.application._init_broker", new=Mock(side_effect=ImportError(
+        "PyMsalRuntime not installed"
+    )))
+    def test_broker_should_be_disabled_by_default(self):
+        app = msal.PublicClientApplication(
+            "client_id",
+            authority="https://login.microsoftonline.com/common",
+            )
+        self.assertFalse(app._enable_broker)
+
+    @patch("msal.application._init_broker", new=Mock(side_effect=ImportError(
+        "PyMsalRuntime not installed"
+    )))
+    def test_opt_in_should_error_out_when_pymsalruntime_not_installed(self):
+        """Because it is actionable to app developer to add dependency declaration"""
+        with self.assertRaises(ImportError):
+            app = msal.PublicClientApplication(
+                "client_id",
+                authority="https://login.microsoftonline.com/common",
+                enable_broker_on_mac=True,
+                )
+
+    @patch("msal.application._init_broker", new=Mock(side_effect=RuntimeError(
+        "PyMsalRuntime raises RuntimeError when broker initialization failed"
+    )))
+    def test_should_fallback_when_pymsalruntime_failed_to_initialize_broker(self):
+        app = msal.PublicClientApplication(
+            "client_id",
+            authority="https://login.microsoftonline.com/common",
+            enable_broker_on_mac=True,
+            )
+        self.assertFalse(app._enable_broker)
+
+
+@patch("sys.platform", new="darwin")  # Pretend running on Mac.
+@patch("msal.authority.tenant_discovery", new=Mock(return_value={
+    "authorization_endpoint": "https://contoso.com/placeholder",
+    "token_endpoint": "https://contoso.com/placeholder",
+    }))
+@patch("msal.application._init_broker", new=Mock())  # Pretend pymsalruntime installed and working
+class TestBrokerFallbackWithDifferentAuthorities(unittest.TestCase):
+
+    def test_broker_should_be_disabled_by_default(self):
+        app = msal.PublicClientApplication(
+            "client_id",
+            authority="https://login.microsoftonline.com/common",
+            )
+        self.assertFalse(app._enable_broker)
+
+    def test_broker_should_be_enabled_when_opted_in(self):
+        app = msal.PublicClientApplication(
+            "client_id",
+            authority="https://login.microsoftonline.com/common",
+            enable_broker_on_mac=True,
+            )
+        self.assertTrue(app._enable_broker)
+
+    def test_should_fallback_to_non_broker_when_using_adfs(self):
+        app = msal.PublicClientApplication(
+            "client_id",
+            authority="https://contoso.com/adfs",
+            #instance_discovery=False,  # Automatically skipped when detected ADFS
+            enable_broker_on_mac=True,
+            )
+        self.assertFalse(app._enable_broker)
+
+    def test_should_fallback_to_non_broker_when_using_b2c(self):
+        app = msal.PublicClientApplication(
+            "client_id",
+            authority="https://contoso.b2clogin.com/contoso/policy",
+            #instance_discovery=False,  # Automatically skipped when detected B2C
+            enable_broker_on_mac=True,
+            )
+        self.assertFalse(app._enable_broker)
+
+    def test_should_use_broker_when_disabling_instance_discovery(self):
+        app = msal.PublicClientApplication(
+            "client_id",
+            authority="https://contoso.com/path",
+            instance_discovery=False,  # Need this for a generic authority url
+            enable_broker_on_mac=True,
+            )
+        # TODO: Shall we bypass broker when opted out of instance discovery?
+        self.assertTrue(app._enable_broker)  # Current implementation enables broker
+
+    def test_should_fallback_to_non_broker_when_using_oidc_authority(self):
+        app = msal.PublicClientApplication(
+            "client_id",
+            oidc_authority="https://contoso.com/path",
+            enable_broker_on_mac=True,
+            )
+        self.assertFalse(app._enable_broker)
+
+    def test_app_did_not_register_redirect_uri_should_error_out(self):
+        """Because it is actionable to app developer to add redirect URI"""
+        app = msal.PublicClientApplication(
+            "client_id",
+            authority="https://login.microsoftonline.com/common",
+            enable_broker_on_mac=True,
+            )
+        self.assertTrue(app._enable_broker)
+        with patch.object(
+            # Note: We tried @patch("msal.broker.foo", ...) but it ended up with
+            # "module msal does not have attribute broker"
+            app, "_acquire_token_interactive_via_broker", return_value={
+                "error": "broker_error",
+                "error_description":
+                    "(pii).  "  # pymsalruntime no longer surfaces AADSTS error,
+                                # So MSAL Python can't raise RedirectUriError.
+                    "Status: Response_Status.Status_ApiContractViolation, "
+                    "Error code: 3399614473, Tag 557973642",
+            }):
+            result = app.acquire_token_interactive(
+                ["scope"],
+                parent_window_handle=app.CONSOLE_WINDOW_HANDLE,
+                )
+            self.assertEqual(result.get("error"), "broker_error")
 
